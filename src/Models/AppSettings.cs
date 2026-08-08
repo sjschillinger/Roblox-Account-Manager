@@ -103,6 +103,8 @@ public class AppSettings
     public int RamMonitorSeconds { get; set; } = 10;        // poll interval
     public bool AutoCloseOnHighRam { get; set; } = false;   // kill a client over the limit
     public int RamLimitMb { get; set; } = 4096;             // per-client working-set cap
+    public bool AutoTrimEnabled { get; set; } = false;      // periodically page idle memory out
+    public int AutoTrimMinutes { get; set; } = 10;          // how often auto-trim runs
 
     // ---- global hotkeys (#29 Power-Tools) ----
     // Disabled by default so a fresh install never steals a system-wide chord, but

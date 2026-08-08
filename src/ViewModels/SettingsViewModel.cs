@@ -80,6 +80,18 @@ public class SettingsViewModel : ObservableObject
         RestoreClientsCommand = new RelayCommand(_ => ReportClientAction(InstanceControlService.RestoreAll(), "restored"));
 
         TestAntiAfkCommand = new RelayCommand(_ => TestAntiAfk());
+        TrimRamCommand = new RelayCommand(_ => TrimRam());
+        CheckForUpdatesCommand = new AsyncRelayCommand(() => _main.CheckForUpdateNowAsync());
+        ShowWhatsNewCommand = new AsyncRelayCommand(() => _main.ShowWhatsNewAsync());
+
+        // The check runs on the main view-model; mirror its progress onto this page.
+        _main.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(MainViewModel.UpdateCheckStatus))
+                OnPropertyChanged(nameof(UpdateCheckStatus));
+            else if (e.PropertyName is nameof(MainViewModel.UpdateCheckRunning))
+                OnPropertyChanged(nameof(UpdateCheckRunning));
+        };
         ApplyFFlagsNowCommand = new RelayCommand(_ => ApplyFFlagsNow());
         ClearFFlagsCommand = new RelayCommand(_ => ClearFFlags());
         GenerateWebApiTokenCommand = new RelayCommand(_ => { WebApiToken = NewToken(); _main.SetStatus("New API token generated."); });
@@ -272,6 +284,32 @@ public class SettingsViewModel : ObservableObject
     public RelayCommand ReloadPluginsCommand { get; }
 
     public string AppVersion => AppInfo.Long;
+
+    // ---- Updates ----
+    // The background poll runs every 5 minutes, but it is silent when there is nothing new, so
+    // there was no way to tell "up to date" apart from "the check is broken". These surface it.
+
+    /// <summary>Result of the last check, owned by <see cref="MainViewModel"/> (one poller, one truth).</summary>
+    public string UpdateCheckStatus => _main.UpdateCheckStatus;
+    public bool UpdateCheckRunning => _main.UpdateCheckRunning;
+
+    public AsyncRelayCommand CheckForUpdatesCommand { get; private set; } = null!;
+    public AsyncRelayCommand ShowWhatsNewCommand { get; private set; } = null!;
+
+    /// <summary>Where the installed client actually lives — useful when a launch misbehaves.</summary>
+    public string InstallStatus
+    {
+        get
+        {
+            string? install = RobloxInstallService.DescribeInstall();
+            string? owner = RobloxInstallService.ProtocolOwner();
+            if (install == null)
+                return "No Roblox client found. Install Roblox and run any game once.";
+            return owner != null && !owner.Contains("roblox", StringComparison.OrdinalIgnoreCase)
+                ? $"{install}\nLaunches are handled by {owner}."
+                : install;
+        }
+    }
 
     // ---- Diagnostics / self-check / running clients ----
 
@@ -562,14 +600,38 @@ public class SettingsViewModel : ObservableObject
         set { S.RamLimitMb = Math.Clamp(value, 256, 65536); Persist(); }
     }
 
+    public bool AutoTrimEnabled
+    {
+        get => S.AutoTrimEnabled;
+        set { S.AutoTrimEnabled = value; Persist(); RamMonitorService.ApplyAutoTrim(); }
+    }
+    public int AutoTrimMinutes
+    {
+        get => S.AutoTrimMinutes;
+        set { S.AutoTrimMinutes = Math.Clamp(value, 1, 240); Persist(); RamMonitorService.ApplyAutoTrim(); }
+    }
+
+    public RelayCommand TrimRamCommand { get; private set; } = null!;
+
+    private void TrimRam()
+    {
+        var result = RamMonitorService.TrimAll();
+        _main.SetStatus(result.Summary);
+        RefreshRamStatus();
+    }
+
     /// <summary>Live per-client RAM readout, refreshed from the monitor's sampling event.</summary>
     public string RamStatus
     {
         get
         {
-            if (!S.RamMonitorEnabled) return "Monitor is off — turn it on to see per-client memory use.";
             var latest = RamMonitorService.Latest;
-            if (latest.Count == 0) return "No tracked clients yet.";
+            // A manual trim samples too, so show real numbers whenever we have them even if the
+            // periodic monitor itself is off.
+            if (latest.Count == 0)
+                return S.RamMonitorEnabled
+                    ? "No tracked clients yet."
+                    : "Monitor is off — turn it on for a live readout, or use Trim now.";
             long total = latest.Sum(x => x.WorkingSetMb);
             var lines = latest.OrderByDescending(x => x.WorkingSetMb)
                               .Select(x => $"{x.Alias} — {x.WorkingSetMb:N0} MB");

@@ -7,22 +7,14 @@ public static class RequirementsService
 {
     public static bool IsRobloxInstalled()
     {
-        // Protocol handler registered?
+        // Protocol handler registered? That alone means a launch has somewhere to go, even when
+        // the client lives somewhere this app wouldn't think to look.
         try { if (Registry.ClassesRoot.OpenSubKey("roblox-player") != null) return true; }
         catch { }
 
-        // Or the player binary present in a Versions folder.
-        try
-        {
-            string versions = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Roblox", "Versions");
-            if (Directory.Exists(versions) &&
-                Directory.GetFiles(versions, "RobloxPlayerBeta.exe", SearchOption.AllDirectories).Length > 0)
-                return true;
-        }
-        catch { }
-
-        return false;
+        // Otherwise look for the binary itself — including bootstrapper-managed installs, which
+        // keep their versions outside the stock Roblox folder.
+        return RobloxInstallService.IsInstalled();
     }
 
     /// <summary>Runs the startup requirement checks and offers downloads for anything missing.</summary>

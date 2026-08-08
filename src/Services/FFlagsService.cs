@@ -78,33 +78,50 @@ public static class FFlagsService
         catch { return false; }
     }
 
+    /// <summary>
+    /// Writes the flags into every ClientSettings folder that the installed client(s) actually
+    /// read — which, on a machine running a bootstrapper such as Bloxstrap or Froststrap, is the
+    /// launcher's own managed file rather than a version folder. See
+    /// <see cref="RobloxInstallService.FlagTargetDirectories"/>.
+    ///
+    /// Existing flags are <em>merged</em>, not replaced. A bootstrapper's settings file is the
+    /// user's own configuration; overwriting it wholesale would silently wipe every flag they
+    /// had set there. Ours win on a key collision, theirs survive otherwise.
+    /// </summary>
     private static int Write(Dictionary<string, string> flags)
     {
         int written = 0;
-        var json = JsonSerializer.Serialize(flags, new JsonSerializerOptions { WriteIndented = true });
-        foreach (var versionDir in VersionFolders())
+        foreach (var csDir in RobloxInstallService.FlagTargetDirectories())
         {
             try
             {
-                var csDir = Path.Combine(versionDir, "ClientSettings");
                 Directory.CreateDirectory(csDir);
-                File.WriteAllText(Path.Combine(csDir, "ClientAppSettings.json"), json);
+                string file = Path.Combine(csDir, "ClientAppSettings.json");
+
+                var merged = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (File.Exists(file))
+                    foreach (var kv in ParseRaw(File.ReadAllText(file)))
+                        merged[kv.Key] = kv.Value;
+                foreach (var kv in flags) merged[kv.Key] = kv.Value;
+
+                File.WriteAllText(file,
+                    JsonSerializer.Serialize(merged, new JsonSerializerOptions { WriteIndented = true }));
                 written++;
             }
-            catch { /* a locked/permission-denied version folder shouldn't block the rest */ }
+            catch { /* a locked/permission-denied folder shouldn't block the rest */ }
         }
         return written;
     }
 
-    /// <summary>Removes ClientAppSettings.json from every version folder (revert to stock).</summary>
+    /// <summary>Removes ClientAppSettings.json from every flag target (revert to stock).</summary>
     public static int Clear()
     {
         int cleared = 0;
-        foreach (var versionDir in VersionFolders())
+        foreach (var csDir in RobloxInstallService.FlagTargetDirectories())
         {
             try
             {
-                var f = Path.Combine(versionDir, "ClientSettings", "ClientAppSettings.json");
+                var f = Path.Combine(csDir, "ClientAppSettings.json");
                 if (File.Exists(f)) { File.Delete(f); cleared++; }
             }
             catch { }
@@ -149,16 +166,4 @@ public static class FFlagsService
         return flags;
     }
 
-    /// <summary>All <c>Versions\*</c> dirs that contain a RobloxPlayerBeta.exe (client installs).</summary>
-    private static IEnumerable<string> VersionFolders()
-    {
-        var root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Roblox", "Versions");
-        if (!Directory.Exists(root)) yield break;
-
-        foreach (var dir in Directory.EnumerateDirectories(root))
-            if (File.Exists(Path.Combine(dir, "RobloxPlayerBeta.exe")))
-                yield return dir;
-    }
 }

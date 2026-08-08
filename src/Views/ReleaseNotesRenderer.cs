@@ -22,8 +22,11 @@ internal static class ReleaseNotesRenderer
         target.Children.Clear();
         if (string.IsNullOrWhiteSpace(markdown))
         {
+            // Reached only when this build shipped without embedded notes *and* GitHub was
+            // unreachable. Say which of those the user can do something about.
             target.Children.Add(Line(
-                "Release notes could not be loaded — see the GitHub release page for details.",
+                "No changelog is available offline for this build, and the GitHub release page "
+                + "could not be reached. Check your connection, or open the release page below.",
                 muted: true));
             return;
         }

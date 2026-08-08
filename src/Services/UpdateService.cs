@@ -124,6 +124,43 @@ public static class UpdateService
     public static string CurrentVersionText => $"v{CurrentVersion().ToString(3)}";
 
     /// <summary>
+    /// This build's own changelog, compiled into the exe (see the EmbeddedResource in the
+    /// csproj). Always available — no network, no GitHub release required. Null only when the
+    /// build was produced without a matching release_notes file.
+    /// </summary>
+    public static string? EmbeddedReleaseNotes
+    {
+        get
+        {
+            try
+            {
+                using var stream = Assembly.GetExecutingAssembly()
+                    .GetManifestResourceStream("ReleaseNotes.md");
+                if (stream == null) return null;
+                using var reader = new StreamReader(stream);
+                string text = reader.ReadToEnd();
+                return string.IsNullOrWhiteSpace(text) ? null : text;
+            }
+            catch { return null; }
+        }
+    }
+
+    /// <summary>
+    /// Notes for the running version, preferring the copy baked into this build and falling back
+    /// to the GitHub release. That order matters: the embedded copy is guaranteed to describe the
+    /// build the user is actually running, whereas the GitHub lookup fails whenever the release
+    /// is unpublished, the machine is offline, or the API rate limit is spent.
+    /// </summary>
+    public static async Task<(string Notes, string PageUrl)?> GetNotesForCurrentVersionAsync()
+    {
+        string version = CurrentVersionText;
+        string pageUrl = $"https://github.com/Vaelixx/Roblox-Account-Manager/releases/tag/{version}";
+
+        if (EmbeddedReleaseNotes is { } local) return (local, pageUrl);
+        return await GetReleaseNotesAsync(version).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Release notes + page URL for a given display version ("v1.3.0"), or null when the tag
     /// doesn't exist / the network is down. Used by the post-update "What's new" window.
     /// </summary>

@@ -28,6 +28,7 @@ public static class RamMonitorService
         var s = SettingsService.Current;
         if (s.RamMonitorEnabled) Start(Math.Max(2, s.RamMonitorSeconds));
         else Stop();
+        ApplyAutoTrim();
     }
 
     private static void Start(int seconds)
@@ -44,7 +45,11 @@ public static class RamMonitorService
 
     public static void Stop()
     {
-        lock (_gate) { _timer?.Dispose(); _timer = null; }
+        lock (_gate)
+        {
+            _timer?.Dispose(); _timer = null;
+            _trimTimer?.Dispose(); _trimTimer = null;   // auto-trim is meaningless without sampling
+        }
         Latest = Array.Empty<Sample>();
     }
 
@@ -83,6 +88,80 @@ public static class RamMonitorService
 
         Latest = snapshot;
         try { Sampled?.Invoke(snapshot); } catch { }
+    }
+
+    /// <summary>Outcome of a trim pass: how many clients were trimmed and how much was released.</summary>
+    public record TrimResult(int Clients, long FreedMb)
+    {
+        public string Summary => Clients == 0
+            ? "No tracked Roblox clients to trim."
+            : FreedMb > 0
+                ? $"Trimmed {Clients} client(s) — {FreedMb:N0} MB released back to Windows."
+                : $"Trimmed {Clients} client(s) — nothing to release right now.";
+    }
+
+    /// <summary>
+    /// Pages every tracked client's idle memory out to the standby list.
+    ///
+    /// The pages return when the client touches them again, so this is not a permanent saving —
+    /// it hands memory back that a client is holding but not using, which is what relieves a
+    /// machine running several clients at once. Called manually, and on a timer when auto-trim
+    /// is on.
+    /// </summary>
+    public static TrimResult TrimAll()
+    {
+        int trimmed = 0;
+        long before = 0, after = 0;
+
+        foreach (var t in ProcessRegistry.All)
+        {
+            try
+            {
+                using var p = Process.GetProcessById(t.Pid);
+                p.Refresh();
+                long b = p.WorkingSet64;
+
+                if (!Win32.EmptyWorkingSet(p.Handle)) continue;
+
+                p.Refresh();
+                before += b;
+                after += p.WorkingSet64;
+                trimmed++;
+            }
+            catch { /* exited, or denied — skip and keep going */ }
+        }
+
+        // Clamp: the client keeps running while we measure, so a busy one can legitimately grow
+        // during the pass and produce a negative delta. Reporting "-40 MB freed" reads as a bug.
+        long freed = Math.Max(0, (before - after) / (1024 * 1024));
+
+        if (trimmed > 0)
+        {
+            DiagnosticsService.Log("ram", $"Trimmed {trimmed} client(s), released {freed} MB");
+            TickCore();   // refresh the readout so the UI shows the post-trim numbers
+        }
+        return new TrimResult(trimmed, freed);
+    }
+
+    // ---- auto-trim ----
+    private static System.Threading.Timer? _trimTimer;
+
+    /// <summary>Starts/stops the periodic trim to match settings. Safe to call repeatedly.</summary>
+    public static void ApplyAutoTrim()
+    {
+        lock (_gate)
+        {
+            _trimTimer?.Dispose();
+            _trimTimer = null;
+
+            var s = SettingsService.Current;
+            if (!s.RamMonitorEnabled || !s.AutoTrimEnabled) return;
+
+            var period = TimeSpan.FromMinutes(Math.Clamp(s.AutoTrimMinutes, 1, 240));
+            _trimTimer = new System.Threading.Timer(
+                _ => { try { TrimAll(); } catch { } },   // a throwing timer callback kills the process
+                null, period, period);
+        }
     }
 
     private static void TryKill(int pid, string alias, long mb, int limit)

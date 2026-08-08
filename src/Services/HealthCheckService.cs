@@ -209,58 +209,26 @@ public static class HealthCheckService
     /// Finds RobloxPlayerBeta.exe under the per-user and 32-bit Program Files version folders.
     /// Reports the newest one, because that is the build the protocol handler will actually run.
     /// </summary>
+    /// <summary>
+    /// Reports the installed client(s), whoever installed them.
+    ///
+    /// This used to look only under <c>Roblox\Versions</c> in %LOCALAPPDATA% and Program Files
+    /// (x86), which reports "not installed" on a perfectly working machine whenever a
+    /// bootstrapper (Bloxstrap, Froststrap, Fishstrap …) owns the install — those keep their
+    /// versions under their own folder, and the stock folder may not exist at all.
+    /// <see cref="RobloxInstallService"/> follows the protocol handler instead, so the row now
+    /// reflects the client a launch would really start.
+    /// </summary>
     private static (bool Ok, string Detail, string? Hint) ProbeRobloxInstalled()
     {
-        var roots = new List<string>(2);
-        AddVersionsRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-        AddVersionsRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86));
+        string? describe = RobloxInstallService.DescribeInstall();
 
-        string? newest = null;
-        DateTime newestStamp = DateTime.MinValue;
-        int found = 0;
-
-        foreach (string root in roots)
-        {
-            if (!Directory.Exists(root)) continue;
-
-            // The whole loop is guarded, not just the call that builds the enumerator: lazy
-            // enumeration faults on MoveNext too (a Roblox update deleting a version folder
-            // mid-walk), and that escape would turn the entire row red even though the other
-            // root already found a player. Anything counted so far survives.
-            try
-            {
-                foreach (string dir in Directory.EnumerateDirectories(root))
-                {
-                    try
-                    {
-                        string exe = Path.Combine(dir, "RobloxPlayerBeta.exe");
-                        if (!File.Exists(exe)) continue;
-
-                        found++;
-                        var stamp = File.GetLastWriteTimeUtc(exe);
-                        if (stamp <= newestStamp) continue;
-
-                        newestStamp = stamp;
-                        newest = Path.GetFileName(dir);
-                    }
-                    catch { /* one unreadable version folder must not hide the others */ }
-                }
-            }
-            catch { /* half-removed install, or a root we are not allowed to list */ }
-        }
-
-        if (newest is null)
-            return (false, "RobloxPlayerBeta.exe was not found in any Versions folder.",
+        if (describe is null)
+            return (false, "RobloxPlayerBeta.exe was not found in any known install location.",
                 "Install Roblox from roblox.com/download and run any game once. Nothing here can launch "
                 + "until the player exists on disk.");
 
-        // Old builds linger after every update; say so rather than looking like a duplicate install.
-        return (true, found > 1 ? $"{newest} (+{found - 1} older)" : newest, null);
-    }
-
-    private static void AddVersionsRoot(List<string> roots, string? baseDir)
-    {
-        if (!string.IsNullOrEmpty(baseDir)) roots.Add(Path.Combine(baseDir, "Roblox", "Versions"));
+        return (true, describe, null);
     }
 
     /// <summary>

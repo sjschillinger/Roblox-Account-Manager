@@ -137,23 +137,89 @@ public class MainViewModel : ObservableObject
 
     public void SetStatus(string s) => Status = s;
 
+    // ---- update-check status, surfaced on the Settings page ----
+
+    private string _updateCheckStatus = "Not checked yet this session.";
+    /// <summary>Plain-language result of the last update check, for the Settings → About card.</summary>
+    public string UpdateCheckStatus { get => _updateCheckStatus; private set => SetField(ref _updateCheckStatus, value); }
+
+    private bool _updateCheckRunning;
+    public bool UpdateCheckRunning { get => _updateCheckRunning; private set => SetField(ref _updateCheckRunning, value); }
+
+    /// <summary>
+    /// Manual "check for updates". Unlike the background poll this always reports an outcome —
+    /// including "you are up to date" and "the check failed", so the button never looks like it
+    /// did nothing.
+    /// </summary>
+    public async Task CheckForUpdateNowAsync()
+    {
+        if (UpdateCheckRunning) return;
+        UpdateCheckRunning = true;
+        UpdateCheckStatus = "Checking GitHub…";
+        SetStatus("Checking for updates…");
+        try
+        {
+            // No ConfigureAwait(false) anywhere in here on purpose: the command is invoked on the
+            // UI thread, so every continuation below resumes there and can touch bindings and
+            // show a modal directly.
+            var info = await UpdateService.CheckForUpdateAsync();
+
+            string stamp = DateTime.Now.ToString("HH:mm");
+            if (info == null)
+            {
+                UpdateCheckStatus = $"You're on the latest version ({AppInfo.Short}). Last checked {stamp}.";
+                SetStatus($"No update available — {AppInfo.Short} is current.");
+                return;
+            }
+
+            Adopt(info);
+            UpdateCheckStatus = $"{info.VersionText} is available ({info.SizeText}). Last checked {stamp}.";
+            SetStatus($"Update available — {info.VersionText}.");
+            _promptedVersion = info.VersionText;
+            PromptForUpdate(info);
+        }
+        catch (Exception ex)
+        {
+            UpdateCheckStatus = $"Check failed: {ex.Message}";
+            SetStatus("Update check failed — check your connection and try again.");
+        }
+        finally { UpdateCheckRunning = false; }
+    }
+
+    /// <summary>Records a discovered update and lights up the title-bar pill.</summary>
+    private void Adopt(UpdateInfo info)
+    {
+        _update = info;
+        UpdateVersionText = $"Update available — {info.VersionText}";
+        OnPropertyChanged(nameof(UpdateAvailable));
+        UpdateNowCommand.RaiseCanExecuteChanged();
+    }
+
     private async Task CheckForUpdateAsync()
     {
         try
         {
             var info = await UpdateService.CheckForUpdateAsync().ConfigureAwait(false);
-            if (info == null) return;
 
             var dispatcher = Application.Current?.Dispatcher;
             if (dispatcher == null) return;
+
+            if (info == null)
+            {
+                // Record the negative result too, so the Settings card can say when we last
+                // looked instead of sitting on "not checked yet" forever.
+                await dispatcher.InvokeAsync(() =>
+                    UpdateCheckStatus = $"You're on the latest version ({AppInfo.Short}). Last checked {DateTime.Now:HH:mm}.");
+                return;
+            }
+
             await dispatcher.InvokeAsync(() =>
             {
-                _update = info;
-                UpdateVersionText = $"Update available — {info.VersionText}";
-                OnPropertyChanged(nameof(UpdateAvailable));
+                Adopt(info);
+                UpdateCheckStatus = $"{info.VersionText} is available ({info.SizeText}). Last checked {DateTime.Now:HH:mm}.";
 
-                // Surface the modal once per discovered version. On every following minute the
-                // pill stays visible but we don't re-prompt, so the 1-min poll never nags.
+                // Surface the modal once per discovered version. On every following poll the
+                // pill stays visible but we don't re-prompt, so the recurring check never nags.
                 if (_promptedVersion != info.VersionText)
                 {
                     _promptedVersion = info.VersionText;
@@ -165,6 +231,25 @@ public class MainViewModel : ObservableObject
         {
             // Best-effort background poll: a network/parse failure must not bubble up as an
             // unobserved task exception every 5 minutes. The pill simply stays as-is.
+        }
+    }
+
+    /// <summary>Re-opens this build's changelog on demand (the post-update window is once-only).</summary>
+    public async Task ShowWhatsNewAsync()
+    {
+        try
+        {
+            string current = UpdateService.CurrentVersionText;
+            // Invoked from the UI thread; keep the continuation there so the window can be shown.
+            var notes = await UpdateService.GetNotesForCurrentVersionAsync();
+
+            var win = new Views.WhatsNewWindow(current, notes?.Notes, notes?.PageUrl);
+            if (Application.Current?.MainWindow is { IsVisible: true } owner) win.Owner = owner;
+            win.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Could not open the changelog: {ex.Message}");
         }
     }
 
@@ -224,7 +309,7 @@ public class MainViewModel : ObservableObject
             SettingsService.Save();
             if (firstInstall || seenInPrompt) return;
 
-            var notes = await UpdateService.GetReleaseNotesAsync(current).ConfigureAwait(false);
+            var notes = await UpdateService.GetNotesForCurrentVersionAsync().ConfigureAwait(false);
             var dispatcher = Application.Current?.Dispatcher;
             if (dispatcher == null) return;
             await dispatcher.InvokeAsync(() =>

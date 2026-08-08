@@ -28,6 +28,17 @@ internal static class Win32
     internal const int SM_CXSCREEN = 0;   // primary monitor width (physical px)
     internal const int SM_CYSCREEN = 1;   // primary monitor height (physical px)
 
+    /// <summary>
+    /// Asks Windows to page a process's working set out to the standby list / pagefile.
+    ///
+    /// This does not free memory the process is genuinely using — the pages come back on the next
+    /// access. What it does is hand idle pages back to the system, which is exactly what helps
+    /// when several Roblox clients have each ballooned their working set and the machine is
+    /// starting to thrash. Expect the number to climb again as each client is used.
+    /// </summary>
+    [DllImport("psapi.dll", SetLastError = true)]
+    internal static extern bool EmptyWorkingSet(IntPtr hProcess);
+
     /// <summary>Restores a window if it is currently minimized; no-op otherwise.</summary>
     internal static void RestoreIfMinimized(IntPtr hWnd)
     {

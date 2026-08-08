@@ -11,7 +11,7 @@
     <RootNamespace>RobloxAccountManager</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <Version>1.5.0</Version>
+    <Version>1.5.1</Version>
     <Product>Roblox Account Manager</Product>
     <Company>RAM</Company>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -29,6 +29,18 @@
        alt-tab, titlebar) instead of soft-scaling a single 256px bitmap. -->
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+
+  <!-- Ship this version's changelog inside the exe.
+       "What's new" used to have exactly one source: the GitHub release for the running version.
+       That fails whenever the release hasn't been published yet, the machine is offline, or the
+       unauthenticated GitHub API (60 requests/hour per IP) is exhausted — and the window then
+       showed "Release notes could not be loaded" with nothing else to offer. The notes are in
+       the repo already, so bake them in and treat the network as an enhancement. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\release_notes_v$(Version).md"
+                      Condition="Exists('..\release_notes_v$(Version).md')"
+                      LogicalName="ReleaseNotes.md" />
   </ItemGroup>
 
   <ItemGroup>
