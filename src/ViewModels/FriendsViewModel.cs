@@ -32,7 +32,22 @@ public class FriendsViewModel : ObservableObject
         OpenProfileCommand = new RelayCommand(p => OpenProfile(p as Friend));
 
         // Make the tab useful immediately by defaulting to the first account.
+        //
+        // This view-model is constructed while the store is still empty — the accounts are
+        // decrypted and added a moment later, during startup — so seeding once here always
+        // picked null and left the tab permanently blank until the user chose an account by
+        // hand. Keep watching the collection until the first account actually shows up.
         _selectedAccount = _store.Accounts.FirstOrDefault();
+        if (_selectedAccount == null)
+            _store.Accounts.CollectionChanged += OnStoreAccountsChanged;
+    }
+
+    private void OnStoreAccountsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        var first = _store.Accounts.FirstOrDefault();
+        if (first == null) return;
+        _store.Accounts.CollectionChanged -= OnStoreAccountsChanged;
+        SelectedAccount = first;
     }
 
     /// <summary>Accounts available in the manager (drives the picker).</summary>

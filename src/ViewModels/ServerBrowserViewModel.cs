@@ -64,8 +64,14 @@ public class ServerBrowserViewModel : ObservableObject
         var ordered = _sortByPing
             ? Servers.OrderBy(s => s.Ping <= 0 ? int.MaxValue : s.Ping).ToList()
             : Servers.OrderByDescending(s => s.Playing).ToList();
+
+        // Clearing the collection makes the list control drop its SelectedItem, so flipping the
+        // sort used to silently throw away the server the user had just picked — and Join then
+        // reported "Select a server first". Put the same row back afterwards.
+        var keep = _selected;
         Servers.Clear();
         foreach (var s in ordered) Servers.Add(s);
+        if (keep != null && Servers.Contains(keep)) Selected = keep;
     }
 
     private void CopyPlaceId()

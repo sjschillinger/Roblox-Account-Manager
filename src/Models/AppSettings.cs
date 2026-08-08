@@ -83,6 +83,7 @@ public class AppSettings
     public bool FFlagUnlockFps { get; set; } = false;       // DFIntTaskSchedulerTargetFps
     public bool FFlagDisableTelemetry { get; set; } = false;
     public bool FFlagLightingTechVoxel { get; set; } = false;
+    public bool FFlagDisableVoiceChat { get; set; } = false;
     // Raw user-supplied flags, merged last so they always win.
     public Dictionary<string, string> CustomFFlags { get; set; } = new();
 

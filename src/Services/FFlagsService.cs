@@ -12,22 +12,82 @@ namespace RobloxAccountManager.Services;
 public static class FFlagsService
 {
     /// <summary>
-    /// Applies the configured flags to every installed Roblox version folder.
-    /// No-op when <see cref="AppSettings.ApplyFFlags"/> is off. Returns folders written.
+    /// Everything the launch path needs to write before starting a client: the FPS cap from
+    /// "Unlock FPS", the FastFlag toggles, the user's raw flags, and finally this account's own
+    /// per-account overrides. Returns how many version folders were written (0 = nothing to do).
+    ///
+    /// This is what actually makes "Unlock FPS" work. It used to write a single
+    /// <c>%LOCALAPPDATA%\Roblox\ClientSettings\ClientAppSettings.json</c>, a path the modern
+    /// client does not read — the cap was silently ignored on every launch. The client reads
+    /// per-version settings, which is where <see cref="VersionFolders"/> points.
     /// </summary>
-    public static int Apply(AppSettings s)
+    public static int ApplyForLaunch(AppSettings s, Account? account = null)
     {
-        if (!s.ApplyFFlags) return 0;
+        var flags = s.ApplyFFlags ? BuildFlags(s) : new Dictionary<string, string>(StringComparer.Ordinal);
 
-        var flags = BuildFlags(s);
+        // "Unlock FPS" is its own toggle, independent of the FastFlags section, but both end up
+        // in the same file — merged here so enabling one never wipes the other's settings.
+        if (s.UnlockFps)
+            flags["DFIntTaskSchedulerTargetFps"] = s.MaxFps > 0 ? s.MaxFps.ToString() : "9999";
+
+        foreach (var kv in ParseRaw(account?.FFlags))
+            flags[kv.Key] = kv.Value;
+
+        return flags.Count == 0 ? 0 : Write(flags);
+    }
+
+    /// <summary>
+    /// Parses a raw ClientAppSettings JSON blob (per-account overrides, or the custom-flags box)
+    /// into a flat string→string map. Non-string values are stringified so <c>{"X": true}</c> and
+    /// <c>{"X": "True"}</c> behave the same. Invalid JSON yields an empty map rather than throwing.
+    /// </summary>
+    public static Dictionary<string, string> ParseRaw(string? json)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(json)) return map;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return map;
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (string.IsNullOrWhiteSpace(prop.Name)) continue;
+                map[prop.Name.Trim()] = prop.Value.ValueKind switch
+                {
+                    JsonValueKind.String => prop.Value.GetString() ?? "",
+                    JsonValueKind.True => "True",
+                    JsonValueKind.False => "False",
+                    JsonValueKind.Null => "",
+                    _ => prop.Value.GetRawText()
+                };
+            }
+        }
+        catch { /* a half-typed flag blob must never block a launch */ }
+        return map;
+    }
+
+    /// <summary>True when the text parses as a flag object (drives the editor's validity hint).</summary>
+    public static bool IsValidRaw(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return true;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object;
+        }
+        catch { return false; }
+    }
+
+    private static int Write(Dictionary<string, string> flags)
+    {
         int written = 0;
+        var json = JsonSerializer.Serialize(flags, new JsonSerializerOptions { WriteIndented = true });
         foreach (var versionDir in VersionFolders())
         {
             try
             {
                 var csDir = Path.Combine(versionDir, "ClientSettings");
                 Directory.CreateDirectory(csDir);
-                var json = JsonSerializer.Serialize(flags, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(Path.Combine(csDir, "ClientAppSettings.json"), json);
                 written++;
             }
@@ -62,6 +122,11 @@ public static class FFlagsService
             // The scheduler cap is what actually gates FPS; 0 = uncapped, then set a high target.
             flags["DFIntTaskSchedulerTargetFps"] = s.MaxFps > 0 ? s.MaxFps.ToString() : "9999";
             flags["FFlagDebugGraphicsDisableDirect3D11"] = "False";
+        }
+        if (s.FFlagDisableVoiceChat)
+        {
+            flags["FFlagDisableVoiceChat"] = "True";
+            flags["FFlagEnableVoiceChatSpatialAudio"] = "False";
         }
         if (s.FFlagDisableTelemetry)
         {

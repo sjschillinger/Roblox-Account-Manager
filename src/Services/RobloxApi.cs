@@ -15,9 +15,47 @@ namespace RobloxAccountManager.Services;
 /// </summary>
 public static class RobloxApi
 {
-    private static readonly HttpClient Http;
+    private static readonly object _clientGate = new();
+    private static HttpClient _http = BuildClient(ProxySignature());
+    private static string _builtFor = ProxySignature();
 
-    static RobloxApi()
+    /// <summary>
+    /// The shared client, rebuilt on demand when the proxy settings changed.
+    ///
+    /// The proxy used to be configured in settings and then quietly ignored: the handler was
+    /// created once in a static constructor with no <c>Proxy</c> at all, so every Roblox call
+    /// went out over the direct connection no matter what the user had entered.
+    /// </summary>
+    private static HttpClient Http
+    {
+        get
+        {
+            var sig = ProxySignature();
+            if (sig == _builtFor) return _http;
+            lock (_clientGate)
+            {
+                if (sig == _builtFor) return _http;
+                var old = _http;
+                _http = BuildClient(sig);
+                _builtFor = sig;
+                // Dispose the superseded client off the hot path; in-flight requests keep their
+                // own connection until they complete, so a brief delay avoids cancelling them.
+                _ = Task.Run(async () => { await Task.Delay(30_000); try { old.Dispose(); } catch { } });
+                return _http;
+            }
+        }
+    }
+
+    /// <summary>Identity of the proxy configuration a client was built for — cheap change detection.</summary>
+    private static string ProxySignature()
+    {
+        var s = SettingsService.Current;
+        return s.EnableProxy && !string.IsNullOrWhiteSpace(s.ProxyAddress)
+            ? $"{s.ProxyAddress.Trim()}|{s.ProxyUsername}|{s.ProxyPassword}"
+            : "";
+    }
+
+    private static HttpClient BuildClient(string signature)
     {
         var handler = new HttpClientHandler
         {
@@ -25,8 +63,63 @@ public static class RobloxApi
             AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
         };
-        Http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
-        Http.DefaultRequestHeaders.UserAgent.ParseAdd("Roblox/WinInet");
+
+        if (signature.Length > 0)
+        {
+            var s = SettingsService.Current;
+            var proxy = TryBuildProxy(s.ProxyAddress, s.ProxyUsername, s.ProxyPassword);
+            if (proxy != null) { handler.Proxy = proxy; handler.UseProxy = true; }
+        }
+
+        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Roblox/WinInet");
+        return client;
+    }
+
+    /// <summary>
+    /// Turns a user-typed proxy string into a <see cref="WebProxy"/>. Accepts bare
+    /// <c>host:port</c> as well as a full <c>http://</c> / <c>socks5://</c> URI.
+    /// Returns null when the value cannot be parsed, so a typo falls back to a direct
+    /// connection rather than breaking every request.
+    /// </summary>
+    public static WebProxy? TryBuildProxy(string? address, string? user, string? password)
+    {
+        address = (address ?? "").Trim();
+        if (address.Length == 0) return null;
+        if (!address.Contains("://", StringComparison.Ordinal)) address = "http://" + address;
+        try
+        {
+            var proxy = new WebProxy(new Uri(address));
+            if (!string.IsNullOrEmpty(user))
+                proxy.Credentials = new NetworkCredential(user, password ?? "");
+            return proxy;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Sends a single request through the configured proxy and reports whether Roblox answered.
+    /// Backs the "Test proxy" button — a proxy that silently swallows traffic is otherwise only
+    /// discovered when every account suddenly looks offline.
+    /// </summary>
+    public static async Task<(bool ok, string message)> TestProxyAsync(string address, string user, string password)
+    {
+        var proxy = TryBuildProxy(address, user, password);
+        if (proxy == null) return (false, "That proxy address could not be parsed. Use host:port or http://host:port.");
+
+        using var handler = new HttpClientHandler { Proxy = proxy, UseProxy = true, AllowAutoRedirect = false };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Roblox/WinInet");
+        try
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            using var resp = await client.GetAsync("https://users.roblox.com/v1/users/1");
+            sw.Stop();
+            return resp.IsSuccessStatusCode
+                ? (true, $"Proxy works — Roblox answered in {sw.ElapsedMilliseconds} ms.")
+                : (false, $"Proxy reached, but Roblox answered HTTP {(int)resp.StatusCode}.");
+        }
+        catch (Exception ex) { return (false, $"Proxy failed: {ex.Message}"); }
     }
 
     private static HttpRequestMessage Build(HttpMethod method, string url, string cookie,

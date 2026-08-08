@@ -30,6 +30,36 @@ public partial class AccountsPage : UserControl
         _searchDebounce.Start();
     }
 
+    /// <summary>
+    /// The 2FA secret box commits on LostFocus, which updates the account but tells the
+    /// view-model nothing — so the code panel would stay blank until the selection changed.
+    /// Persist and regenerate right here instead.
+    /// </summary>
+    private void TotpSecret_LostFocus(object sender, RoutedEventArgs e)
+    {
+        // Push the edit into the account first. Both this handler and the binding's own
+        // LostFocus update listen to the same event, so relying on their ordering would
+        // sometimes regenerate the code from the *previous* secret.
+        CommitBinding(sender);
+        if (DataContext is AccountsViewModel vm) vm.OnTotpSecretEdited();
+    }
+
+    /// <summary>
+    /// The per-account FastFlags box sits below the "Save details" button, so it would be
+    /// easy to type flags and lose them. Commit and persist as soon as focus leaves.
+    /// </summary>
+    private void AccountFFlags_LostFocus(object sender, RoutedEventArgs e)
+    {
+        CommitBinding(sender);
+        if (DataContext is AccountsViewModel vm) vm.Store.Save();
+    }
+
+    private static void CommitBinding(object sender)
+    {
+        if (sender is TextBox tb)
+            tb.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+    }
+
     // ---- Keyboard shortcuts -----------------------------------------------------
     // F5     : refresh every account's presence/thumbnail (safe to fire while typing).
     // Ctrl+F : jump into the search box and select its text.

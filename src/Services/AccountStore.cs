@@ -248,11 +248,14 @@ public class AccountStore
             }
         }
 
-        // Robux (per account)
+        // Robux (per account). Accounts whose cookie Roblox already rejected are skipped —
+        // the call can only fail for them, and on a list with a few dead cookies that was a
+        // wasted round-trip each, every refresh. The economy pass below always did this.
         if (settings.ShowRobux)
         {
             foreach (var a in accounts)
             {
+                if (!a.IsValid) continue;
                 long rbx = await RobloxApi.GetRobuxAsync(a.Cookie);
                 if (rbx >= 0) a.Robux = rbx;
             }

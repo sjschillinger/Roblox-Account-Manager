@@ -141,6 +141,325 @@
                         <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
                                   IsChecked="{Binding ShowRobux}" />
                     </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Track economy" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Also fetch collectible RAP and Premium membership. Slower — one extra pass per account."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding TrackEconomy}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Presence refresh" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Seconds between dashboard presence polls." Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <TextBox Width="90" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                 Text="{Binding PresencePollSeconds, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- ===== Automation ===== -->
+            <TextBlock Text="Automation" Style="{StaticResource DisplayText}" FontSize="15" Margin="2,0,0,10" />
+            <Border Style="{StaticResource Card}" Padding="4" Margin="0,0,0,20">
+                <StackPanel>
+                    <!-- Anti-AFK -->
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Anti-AFK" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Keeps running clients from being idle-kicked: focuses each one, sends a single key tap, then returns you to what you were doing. One input per interval — it does not play the game for you."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding AntiAfkEnabled}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,180,0">
+                            <TextBlock Text="Interval" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Minutes between anti-AFK passes." Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <TextBox Width="90" HorizontalAlignment="Right" VerticalAlignment="Center" IsEnabled="{Binding AntiAfkEnabled}"
+                                 Text="{Binding AntiAfkIntervalMinutes, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,180,0">
+                            <TextBlock Text="Key to tap" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Space resets Roblox's idle timer most reliably; F13 is a no-op in nearly every game."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <ComboBox Width="120" HorizontalAlignment="Right" VerticalAlignment="Center" IsEnabled="{Binding AntiAfkEnabled}"
+                                  ItemsSource="{Binding AntiAfkKeys}" SelectedItem="{Binding AntiAfkKey}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Give focus back" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Return to the window you were using after each pass." Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding AntiAfkRestoreFocus}" IsEnabled="{Binding AntiAfkEnabled}" />
+                    </Grid>
+                    <StackPanel Margin="16,0,16,14">
+                        <Button Content="Run one pass now" Command="{Binding TestAntiAfkCommand}"
+                                Style="{StaticResource GhostButton}" HorizontalAlignment="Left" />
+                    </StackPanel>
+
+                    <Border Height="1" Background="{DynamicResource HairlineStrongBrush}" Margin="16,0" />
+
+                    <!-- Crash watchdog -->
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Crash watchdog" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Notices when a tracked client closes or crashes. Accounts with &quot;Auto-rejoin&quot; on (Accounts → details) are relaunched into the same server, with a brake that stops after 3 crashes in 10 minutes."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding WatchdogEnabled}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,180,0">
+                            <TextBlock Text="Check every" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Seconds between client checks." Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <TextBox Width="90" HorizontalAlignment="Right" VerticalAlignment="Center" IsEnabled="{Binding WatchdogEnabled}"
+                                 Text="{Binding WatchdogCheckSeconds, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+
+                    <Border Height="1" Background="{DynamicResource HairlineStrongBrush}" Margin="16,0" />
+
+                    <!-- RAM monitor -->
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="RAM monitor" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Samples how much memory each running client uses." Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding RamMonitorEnabled}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,180,0">
+                            <TextBlock Text="Sample every" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Seconds between memory samples." Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <TextBox Width="90" HorizontalAlignment="Right" VerticalAlignment="Center" IsEnabled="{Binding RamMonitorEnabled}"
+                                 Text="{Binding RamMonitorSeconds, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Close clients over the limit" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Kills any client whose working set exceeds the cap below. Off by default — this ends the session without warning."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding AutoCloseOnHighRam}" IsEnabled="{Binding RamMonitorEnabled}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,180,0">
+                            <TextBlock Text="Per-client limit (MB)" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Working-set cap for a single Roblox client." Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <TextBox Width="90" HorizontalAlignment="Right" VerticalAlignment="Center" IsEnabled="{Binding AutoCloseOnHighRam}"
+                                 Text="{Binding RamLimitMb, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                    <StackPanel Margin="16,0,16,14">
+                        <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="6" Padding="12,10">
+                            <TextBlock Text="{Binding RamStatus}" Style="{StaticResource Caption}" TextWrapping="Wrap" FontFamily="Consolas" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ===== FastFlags ===== -->
+            <TextBlock Text="FastFlags" Style="{StaticResource DisplayText}" FontSize="15" Margin="2,0,0,10" />
+            <Border Style="{StaticResource Card}" Padding="4" Margin="0,0,0,20">
+                <StackPanel>
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Apply FastFlags" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Writes ClientAppSettings.json into every installed Roblox version before each launch. Unknown or mistyped flags are ignored by the client, but a bad value can stop it starting — clear them if a launch misbehaves."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding ApplyFFlags}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Uncap frame rate" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Raises the task-scheduler target to the FPS cap set under Performance." Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding FFlagUnlockFps}" IsEnabled="{Binding ApplyFFlags}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Disable telemetry" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Turns off the client's telemetry event reporting." Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding FFlagDisableTelemetry}" IsEnabled="{Binding ApplyFFlags}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Force voxel lighting" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Cheapest lighting technology — helps a lot on weak GPUs." Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding FFlagLightingTechVoxel}" IsEnabled="{Binding ApplyFFlags}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Disable voice chat" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Skips loading the voice stack — less RAM per client." Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding FFlagDisableVoiceChat}" IsEnabled="{Binding ApplyFFlags}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <StackPanel Margin="16,14">
+                        <TextBlock Text="Custom flags" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="A JSON object of raw flags, merged last so it overrides the toggles above."
+                                   Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,8" />
+                        <TextBox MinHeight="90" FontFamily="Consolas" FontSize="11.5"
+                                 Text="{Binding CustomFFlagsText, UpdateSourceTrigger=PropertyChanged}">
+                            <TextBox.Style>
+                                <Style TargetType="TextBox" BasedOn="{StaticResource TextArea}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding CustomFFlagsValid}" Value="False">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+                                            <Setter Property="BorderThickness" Value="2" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBox.Style>
+                        </TextBox>
+                        <TextBlock Text="{Binding FFlagsSummary}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                        <WrapPanel Margin="0,12,0,0">
+                            <Button Content="Write flags now" Command="{Binding ApplyFFlagsNowCommand}" Style="{StaticResource GhostButton}" />
+                            <Button Content="Clear all flags" Command="{Binding ClearFFlagsCommand}" Style="{StaticResource GhostButton}" Margin="10,0,0,0" />
+                        </WrapPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ===== Global hotkeys ===== -->
+            <TextBlock Text="Global hotkeys" Style="{StaticResource DisplayText}" FontSize="15" Margin="2,0,0,10" />
+            <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="System-wide shortcuts that work even while Roblox has focus. Click a chord to record a new one; press Esc to cancel. A chord another app already owns is skipped silently."
+                               Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,12" />
+                    <ItemsControl ItemsSource="{Binding HotkeyRows}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding Label}" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12.5" TextWrapping="Wrap" Margin="0,0,10,0" />
+                                    <Button Grid.Column="1" Style="{StaticResource GhostButton}" Width="170"
+                                            Content="{Binding DisplayText}" Focusable="True"
+                                            Click="HotkeyCapture_Click" PreviewKeyDown="HotkeyCapture_KeyDown"
+                                            LostKeyboardFocus="HotkeyCapture_LostFocus"
+                                            ToolTip="Click, then press the chord you want" />
+                                    <CheckBox Grid.Column="2" Style="{StaticResource ToggleSwitch}" VerticalAlignment="Center" Margin="12,0,0,0"
+                                              IsChecked="{Binding Enabled}" ToolTip="Enable this hotkey" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- ===== Local Web API ===== -->
+            <TextBlock Text="Local API" Style="{StaticResource DisplayText}" FontSize="15" Margin="2,0,0,10" />
+            <Border Style="{StaticResource Card}" Padding="4" Margin="0,0,0,20">
+                <StackPanel>
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Enable control server" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Lets scripts on this PC drive the manager over HTTP. Bound to 127.0.0.1 only, and every request needs the token below — but anyone who can run code as you can read that token, so keep it off unless you use it."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding WebApiEnabled}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,180,0">
+                            <TextBlock Text="Port" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Local port to listen on." Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <TextBox Width="90" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                 Text="{Binding WebApiPort, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <StackPanel Margin="16,14">
+                        <TextBlock Text="Bearer token" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="Send as &quot;Authorization: Bearer &lt;token&gt;&quot; or ?token=…" Style="{StaticResource Caption}" Margin="0,3,0,8" />
+                        <TextBox Text="{Binding WebApiToken, UpdateSourceTrigger=LostFocus}" FontFamily="Consolas" FontSize="11.5" />
+                        <WrapPanel Margin="0,12,0,0">
+                            <Button Content="Generate new token" Command="{Binding GenerateWebApiTokenCommand}" Style="{StaticResource GhostButton}" />
+                            <Button Content="Copy token" Command="{Binding CopyWebApiTokenCommand}" Style="{StaticResource GhostButton}" Margin="10,0,0,0" />
+                        </WrapPanel>
+                        <TextBlock Text="{Binding WebApiStatus}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,12,0,0" />
+                        <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="6" Padding="12,10" Margin="0,10,0,0">
+                            <TextBlock FontFamily="Consolas" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"
+                                       Text="GET  /ping&#10;GET  /accounts&#10;GET  /status?account=&#10;GET  /cookie?account=&#10;POST /launch?account=&amp;placeId=&amp;jobId=&#10;POST /close?account=" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ===== Proxy ===== -->
+            <TextBlock Text="Proxy" Style="{StaticResource DisplayText}" FontSize="15" Margin="2,0,0,10" />
+            <Border Style="{StaticResource Card}" Padding="4" Margin="0,0,0,20">
+                <StackPanel>
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Route Roblox web calls through a proxy" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Applies to the manager's own API traffic (login checks, presence, servers, Robux). The Roblox client itself still connects directly."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding EnableProxy}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <StackPanel Margin="16,14">
+                        <TextBlock Text="Address" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                        <TextBox Text="{Binding ProxyAddress, UpdateSourceTrigger=LostFocus}" ToolTip="host:port, http://host:port or socks5://host:port" />
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                <TextBlock Text="Username (optional)" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                <TextBox Text="{Binding ProxyUsername, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                                <TextBlock Text="Password (optional)" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                <TextBox Text="{Binding ProxyPassword, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                        </Grid>
+                        <Button Content="Test proxy" Command="{Binding TestProxyCommand}" Style="{StaticResource GhostButton}"
+                                HorizontalAlignment="Left" Margin="0,14,0,0" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -382,6 +701,51 @@
                             <TextBlock Text="Remove password" />
                         </Button>
                     </StackPanel>
+
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="0,18,0,14" />
+
+                    <!-- Portable encrypted backup -->
+                    <TextBlock Text="Backup &amp; restore" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <TextBlock Text="accounts.dat is encrypted with Windows DPAPI, which is tied to this Windows user — copying it to another PC loses everything. A backup re-encrypts your accounts with a password you choose, so it can be restored anywhere. Restoring merges: existing accounts keep their place and only get a fresh cookie."
+                               Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,10" />
+                    <WrapPanel>
+                        <Button Style="{StaticResource GhostButton}" Command="{Binding ExportBackupCommand}" Content="Create backup…" />
+                        <Button Style="{StaticResource GhostButton}" Command="{Binding ImportBackupCommand}" Content="Restore backup…" Margin="10,0,0,0" />
+                    </WrapPanel>
+
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="0,18,0,14" />
+
+                    <Grid Margin="0,0,0,12">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Check cookies on startup" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Validates every saved cookie against Roblox when the app opens, so dead accounts are marked before you try to launch them."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding ValidateCookiesOnStartup}" />
+                    </Grid>
+                    <Button Style="{StaticResource GhostButton}" Command="{Binding ValidateCookiesNowCommand}"
+                            Content="Check all cookies now" HorizontalAlignment="Left" Margin="0,0,0,14" />
+
+                    <Grid Margin="0,0,0,12">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Capture rotated cookies" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Roblox sometimes issues a new .ROBLOSECURITY during launch. Saving it keeps the account working; turning this off means such an account eventually stops launching."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding RotationDetectionEnabled}" />
+                    </Grid>
+
+                    <Grid>
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Security audit log" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Records unlocks, launches, cookie rotations and account changes to data/audit.log. Cookie values are never written."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding AuditLogEnabled}" />
+                    </Grid>
                 </StackPanel>
             </Border>
 

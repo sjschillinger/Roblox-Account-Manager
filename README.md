@@ -57,11 +57,30 @@ all from a clean, modern desktop app.
 | 📦 **Zero setup** | One portable, self-contained `.exe` (~56 MB). No .NET install required on the target PC. |
 | 🔄 **Auto-update check** | Notifies you when a new release is available — updating is always your choice. |
 
+### Automation
+| | |
+|---|---|
+| ☕ **Anti-AFK** | Keeps running clients from being idle-kicked — one key tap per interval, then focus goes back where it was. |
+| 🔁 **Crash watchdog** | Notices a client that closed or crashed and relaunches accounts marked **Auto-rejoin** into the same server, with a crash-loop brake. |
+| 📉 **RAM monitor** | Live per-client memory, with an optional cap that closes a client that runs away. |
+| ⏱️ **Scheduler & presets** | Time-triggered launches and closes, driven by named launch presets. |
+| ⌨️ **Global hotkeys** | Record a chord per action — launch, server-hop, close all clients, focus the manager. |
+| 🔌 **Local control API** | Token-gated HTTP server on `127.0.0.1` so scripts can list, launch, close and query accounts. |
+
+### Tuning
+| | |
+|---|---|
+| 🚩 **FastFlags** | Uncap frame rate, disable telemetry, force voxel lighting, disable voice chat — plus a raw JSON editor. Applies globally or per account. |
+| 🌐 **Proxy** | Route the manager's Roblox API traffic through an HTTP/SOCKS proxy, with credentials and a connection test. |
+
 ### Privacy & security
 | | |
 |---|---|
 | 🔐 **Encrypted at rest** | Account store encrypted with Windows **DPAPI**, or a **master password** (AES-256-GCM + PBKDF2). |
 | 🕵️ **Never plain text** | Each cookie additionally encrypted individually — even the decrypted store never contains a readable cookie. |
+| 💾 **Portable backups** | Password-encrypted export that restores on any PC, unlike the DPAPI store which is bound to one Windows user. |
+| 🔑 **Two-factor codes** | Store a 2FA secret per account and read the live 6-digit code — generated locally, never transmitted. |
+| 📋 **Audit log** | Optional record of unlocks, launches, cookie rotations and account changes. Cookie values are never written. |
 | 🏠 **100 % local** | Cookies never leave your machine. Only official Roblox endpoints are contacted. No telemetry, no analytics. |
 
 ---
@@ -157,17 +176,25 @@ Produces a single portable `dist\Roblox Account Manager.exe` — copy anywhere, 
 
 Planned / under consideration — open an [issue](../../issues) to vote or suggest:
 
-- [ ] **Bulk launch** — select multiple accounts, launch all into the same server with stagger delay
-- [ ] **Auto-rejoin watchdog** — relaunch an instance into the same server if it crashes or disconnects
-- [ ] **Window arranger** — auto-tile multiple Roblox windows in a grid
-- [ ] **Join friend / follow player** — join the server a given username is playing on
-- [ ] **Private-server & share-link support** — paste any roblox.com share link, launch directly
+Shipped:
+
+- [x] **Bulk launch** — select multiple accounts, launch all into the same server with stagger delay
+- [x] **Auto-rejoin watchdog** — relaunch an instance into the same server if it crashes or disconnects
+- [x] **Window arranger** — auto-tile multiple Roblox windows in a grid
+- [x] **Join friend / follow player** — join the server a given username is playing on
+- [x] **Private-server & share-link support** — paste any roblox.com share link, launch directly
+- [x] **Encrypted backup & restore** — one-file export/import of the whole account store *(v1.5.0)*
+- [x] **Quick-launch hotkeys** — bind actions to a global hotkey *(v1.5.0)*
+- [x] **Accent & theme picker** — custom accent colour and a full theme editor
+- [x] **Localisation** — English + German
+- [x] **CLI companion** — `ram launch --account <alias> --place <id>` for scripting
+
+Still open:
+
 - [ ] **Account health panel** — cookie age, last validation, expiry warnings
-- [ ] **Encrypted backup & restore** — one-file export/import of the whole account store
-- [ ] **Quick-launch hotkeys** — bind favourite account + place to a global hotkey
-- [ ] **Accent & theme picker** — custom accent colour, optional light mode
-- [ ] **Localisation** — English + German to start
-- [ ] **CLI companion** — `ram launch --account <alias> --place <id>` for scripting
+- [ ] **Scheduler & preset editor** — the engine runs; it still needs a UI to build tasks and presets
+- [ ] **Per-account proxy** — the field is stored, but only the global proxy is applied today
+- [ ] **Light mode** — the theme editor can already get close; a proper preset is not there yet
 
 ---
 

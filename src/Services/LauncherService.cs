@@ -69,8 +69,9 @@ public static class LauncherService
         var settings = SettingsService.Current;
         EnsureMultiInstance(settings.EnableMultiInstance);
 
-        if (settings.UnlockFps)
-            TryPatchFps(settings.MaxFps);
+        // FPS cap + FastFlags + this account's own overrides, written into every installed
+        // client version before the process starts.
+        try { FFlagsService.ApplyForLaunch(settings, acc); } catch { }
 
         string tracker = EnsureTrackerId(acc);
 
@@ -288,19 +289,5 @@ public static class LauncherService
         }
         _lastProcess.Clear();
         return closed;
-    }
-
-    private static void TryPatchFps(int fps)
-    {
-        try
-        {
-            string dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Roblox", "ClientSettings");
-            Directory.CreateDirectory(dir);
-            File.WriteAllText(Path.Combine(dir, "ClientAppSettings.json"),
-                "{\"DFIntTaskSchedulerTargetFps\":" + fps + "}");
-        }
-        catch { }
     }
 }

@@ -23,6 +23,13 @@ public static class BackupService
     private class Entry
     {
         public string Cookie { get; set; } = "";
+        /// <summary>
+        /// Carried so a restore lands a usable account straight away. Almost everything keys off
+        /// the user id — presence, RAP, premium, launch attribution — and a restored account
+        /// without one is inert until it is re-validated. Absent in pre-1.5 backups, which
+        /// deserialize to 0 and are backfilled by the cookie check the restore runs.
+        /// </summary>
+        public long UserId { get; set; }
         public string Username { get; set; } = "";
         public string DisplayName { get; set; } = "";
         public string Alias { get; set; } = "";
@@ -37,6 +44,7 @@ public static class BackupService
         var entries = accounts.Select(a => new Entry
         {
             Cookie = a.Cookie,
+            UserId = a.UserId,
             Username = a.Username,
             DisplayName = a.DisplayName,
             Alias = a.Alias,
@@ -78,6 +86,7 @@ public static class BackupService
         return entries.Select(e => new Account
         {
             Cookie = e.Cookie,
+            UserId = e.UserId,
             Username = e.Username,
             DisplayName = e.DisplayName,
             Alias = e.Alias,

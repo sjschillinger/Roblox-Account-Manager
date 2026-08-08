@@ -17,10 +17,95 @@ public class AccountsViewModel : ObservableObject
     public Account? Selected
     {
         get => _selected;
-        set { if (SetField(ref _selected, value)) { OnPropertyChanged(nameof(HasSelection)); SyncGroupSelection(); } }
+        set { if (SetField(ref _selected, value)) { OnPropertyChanged(nameof(HasSelection)); SyncGroupSelection(); RefreshTotp(); } }
     }
 
     public bool HasSelection => _selected != null;
+
+    // ---- 2FA (TOTP) ----------------------------------------------------------
+    // Accounts could already store a Base32 2FA secret and TotpService could already turn it
+    // into a code, but the two were never connected — nothing generated or displayed one.
+
+    private System.Windows.Threading.DispatcherTimer? _totpTimer;
+
+    private string _totpCode = "";
+    /// <summary>Current 6-digit code for the selected account, or "" when it has no secret.</summary>
+    public string TotpCode { get => _totpCode; private set => SetField(ref _totpCode, value); }
+
+    private int _totpSeconds;
+    /// <summary>Seconds until the shown code rolls over.</summary>
+    public int TotpSeconds { get => _totpSeconds; private set { if (SetField(ref _totpSeconds, value)) OnPropertyChanged(nameof(TotpCountdown)); } }
+
+    public string TotpCountdown => _totpSeconds > 0 ? $"refreshes in {_totpSeconds}s" : "";
+
+    /// <summary>True once the selected account has a secret that actually produces a code.</summary>
+    public bool HasTotpCode => !string.IsNullOrEmpty(_totpCode);
+
+    /// <summary>Set when a secret is present but unusable, so a typo isn't silently ignored.</summary>
+    private bool _totpInvalid;
+    public bool TotpInvalid { get => _totpInvalid; private set => SetField(ref _totpInvalid, value); }
+
+    /// <summary>
+    /// Re-reads the selected account's secret and starts/stops the one-second refresh.
+    /// The timer only runs while a 2FA account is selected — an idle tick per second for
+    /// every user would be pure waste.
+    /// </summary>
+    private void RefreshTotp()
+    {
+        UpdateTotpNow();
+
+        bool wanted = !string.IsNullOrWhiteSpace(_selected?.TotpSecret);
+        if (wanted && _totpTimer == null)
+        {
+            // Bind to the application dispatcher explicitly: DispatcherTimer otherwise attaches
+            // to whatever thread constructs it, and a timer on a pumpless thread never ticks.
+            var dispatcher = App.Current?.Dispatcher;
+            if (dispatcher == null) return;
+            _totpTimer = new System.Windows.Threading.DispatcherTimer(
+                System.Windows.Threading.DispatcherPriority.Normal, dispatcher)
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            _totpTimer.Tick += (_, _) => UpdateTotpNow();
+            _totpTimer.Start();
+        }
+        else if (!wanted && _totpTimer != null)
+        {
+            _totpTimer.Stop();
+            _totpTimer = null;
+        }
+    }
+
+    private void UpdateTotpNow()
+    {
+        var secret = _selected?.TotpSecret;
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            TotpCode = ""; TotpSeconds = 0; TotpInvalid = false;
+            OnPropertyChanged(nameof(HasTotpCode));
+            return;
+        }
+
+        string? code = TotpService.Generate(secret);
+        TotpCode = code ?? "";
+        TotpInvalid = code == null;
+        TotpSeconds = code == null ? 0 : TotpService.SecondsRemaining();
+        OnPropertyChanged(nameof(HasTotpCode));
+    }
+
+    /// <summary>Called by the view after the secret box is edited, so the code appears at once.</summary>
+    public void OnTotpSecretEdited()
+    {
+        _store.Save();
+        RefreshTotp();
+    }
+
+    private void CopyTotp()
+    {
+        if (string.IsNullOrEmpty(_totpCode)) { _main.SetStatus("No 2FA code to copy — add a secret first."); return; }
+        try { Clipboard.SetText(_totpCode); _main.SetStatus("2FA code copied to clipboard."); }
+        catch { _main.SetStatus("Could not access the clipboard."); }
+    }
 
     // ---- group dropdown ----
     private const string NewGroupSentinel = "＋  New group…";
@@ -168,7 +253,16 @@ public class AccountsViewModel : ObservableObject
 
     private void LookupPlaceDebounced()
     {
-        _placeLookupCts?.Cancel();
+        // Cancel *and* dispose: this fires on every keystroke in the Place ID box, so the
+        // superseded sources (each holding a timer registration) used to pile up unreleased.
+        var previous = _placeLookupCts;
+        _placeLookupCts = null;
+        if (previous != null)
+        {
+            try { previous.Cancel(); } catch { }
+            previous.Dispose();
+        }
+
         var digits = new string(_placeIdText.Where(char.IsDigit).ToArray());
         if (!long.TryParse(digits, out long placeId) || placeId <= 0)
         {
@@ -178,19 +272,22 @@ public class AccountsViewModel : ObservableObject
 
         var cts = new CancellationTokenSource();
         _placeLookupCts = cts;
+        // Snapshot the token: the source is disposed by the next keystroke, and reading
+        // .Token off a disposed source throws.
+        var token = cts.Token;
         _ = Task.Run(async () =>
         {
             try
             {
-                await Task.Delay(500, cts.Token);
-                if (cts.Token.IsCancellationRequested) return;
+                await Task.Delay(500, token);
+                if (token.IsCancellationRequested) return;
 
                 string cookie = _store.Accounts.FirstOrDefault(a => a.IsValid)?.Cookie ?? "";
                 var info = await RobloxApi.GetPlaceInfoAsync(cookie, placeId);
-                if (cts.Token.IsCancellationRequested || info == null) return;
+                if (token.IsCancellationRequested || info == null) return;
 
                 string? icon = await RobloxApi.GetGameIconAsync(info.UniverseId);
-                if (cts.Token.IsCancellationRequested) return;
+                if (token.IsCancellationRequested) return;
 
                 App.Current.Dispatcher.Invoke(() =>
                 {
@@ -252,6 +349,7 @@ public class AccountsViewModel : ObservableObject
     public AsyncRelayCommand ServerHopCommand { get; }
     public AsyncRelayCommand SquadJoinCommand { get; }
     public AsyncRelayCommand InjectScriptCommand { get; }
+    public RelayCommand CopyTotpCommand { get; }
 
     public AccountsViewModel(AccountStore store, MainViewModel main)
     {
@@ -288,6 +386,7 @@ public class AccountsViewModel : ObservableObject
         ServerHopCommand = new AsyncRelayCommand(p => ServerHopAsync(p as IList));
         SquadJoinCommand = new AsyncRelayCommand(p => SquadJoinAsync(p as IList));
         InjectScriptCommand = new AsyncRelayCommand(p => InjectScriptAsync(p as IList));
+        CopyTotpCommand = new RelayCommand(_ => CopyTotp());
 
         _ = LoadSavedPlaceIconsAsync();   // warm up saved-place icons in the background
     }
