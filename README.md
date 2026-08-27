@@ -103,7 +103,7 @@ all from a clean, modern desktop app.
 
 ## 📦 Install
 
-1. Download the latest `Roblox Account Manager.exe` from the [**Releases**](../../releases) page.
+1. Download the latest `RobloxAccountManager.exe` from the [**Releases**](../../releases) page.
 2. Put it in its own folder — it creates a `data\` folder next to itself.
 3. Double-click to run. Nothing else to install.
 
@@ -189,7 +189,10 @@ slices out the section matching the version it is running.
 
 1. Add a `## vX.Y.Z — YYYY-MM-DD` section at the top of `CHANGELOG.md`.
 2. Set `<Version>` in `src/RobloxAccountManager.csproj` to the same number.
-3. Publish with the command above and attach the exe to a GitHub release tagged `vX.Y.Z`.
+3. Publish with the command above, then tag `vX.Y.Z` and attach the exe to a GitHub release under
+   that tag, named `RobloxAccountManager.exe`. The in-app updater takes the **first `.exe` asset** of
+   the latest release, and shows the release **body** in its update prompt — so paste this version's
+   changelog section in there.
 
 ### Tech overview
 
