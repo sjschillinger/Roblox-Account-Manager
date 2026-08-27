@@ -124,25 +124,63 @@ public static class UpdateService
     public static string CurrentVersionText => $"v{CurrentVersion().ToString(3)}";
 
     /// <summary>
-    /// This build's own changelog, compiled into the exe (see the EmbeddedResource in the
-    /// csproj). Always available — no network, no GitHub release required. Null only when the
-    /// build was produced without a matching release_notes file.
+    /// The repository's whole CHANGELOG.md, compiled into the exe (see the EmbeddedResource in the
+    /// csproj). Always available — no network, no GitHub release required. Null only when the build
+    /// was produced without the file.
     /// </summary>
-    public static string? EmbeddedReleaseNotes
+    public static string? EmbeddedChangelog => _changelog ??= LoadEmbeddedChangelog();
+
+    private static string? _changelog;
+
+    private static string? LoadEmbeddedChangelog()
     {
-        get
+        try
         {
-            try
-            {
-                using var stream = Assembly.GetExecutingAssembly()
-                    .GetManifestResourceStream("ReleaseNotes.md");
-                if (stream == null) return null;
-                using var reader = new StreamReader(stream);
-                string text = reader.ReadToEnd();
-                return string.IsNullOrWhiteSpace(text) ? null : text;
-            }
-            catch { return null; }
+            using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Changelog.md");
+            if (stream == null) return null;
+            using var reader = new StreamReader(stream);
+            string text = reader.ReadToEnd();
+            return string.IsNullOrWhiteSpace(text) ? null : text;
         }
+        catch { return null; }
+    }
+
+    /// <summary>Matches a version heading, e.g. "## v1.6.0 — 2026-08-27" or "## 1.6.0".</summary>
+    private static readonly Regex SectionHeading =
+        new(@"^##[ \t]+v?(\d+(?:\.\d+){0,3})\b", RegexOptions.Compiled | RegexOptions.Multiline);
+
+    /// <summary>
+    /// This build's own section of the changelog. One file holds every release, so the section for
+    /// the running version is sliced out at runtime: everything from its "## vX.Y.Z" heading up to
+    /// the next one. Returns null when no section matches, which is the signal to fall back to the
+    /// GitHub release.
+    /// </summary>
+    public static string? EmbeddedReleaseNotes => ChangelogSection(CurrentVersion());
+
+    /// <summary>The changelog section for a specific version, or null when it has none.</summary>
+    public static string? ChangelogSection(Version version)
+    {
+        string? all = EmbeddedChangelog;
+        if (all == null) return null;
+
+        var matches = SectionHeading.Matches(all);
+        for (int i = 0; i < matches.Count; i++)
+        {
+            if (!Version.TryParse(matches[i].Groups[1].Value, out var parsed)) continue;
+            if (Normalize(parsed) != Normalize(version)) continue;
+
+            int start = matches[i].Index;
+            int end = i + 1 < matches.Count ? matches[i + 1].Index : all.Length;
+            string section = all[start..end].TrimEnd();
+
+            // Trim the "---" rule the next section is separated by; it renders as stray text.
+            if (section.EndsWith("---", StringComparison.Ordinal))
+                section = section[..^3].TrimEnd();
+
+            return section.Length == 0 ? null : section;
+        }
+
+        return null;
     }
 
     /// <summary>

@@ -42,6 +42,14 @@ all from a clean, modern desktop app.
 | 🌐 **Server browser** | Browse public servers with live player counts, join directly or copy a Job ID. |
 | 🕹️ **Open anywhere** | Open an account signed-in in a private Chromium window, in the Roblox app, or view its public profile. |
 
+### Adding accounts
+| | |
+|---|---|
+| 🔑 **Sign in with username & password** | Type the account's Roblox credentials — the session cookie is fetched and validated automatically. No developer tools, no copying cookies by hand. |
+| 🔢 **Two-step verification** | A 2FA-protected account asks for its 6-digit code right in the dialog and continues the same sign-in. |
+| 🌍 **Browser sign-in fallback** | When Roblox insists on a captcha, the real login page opens in a throw-away browser profile and the session is picked up automatically. |
+| 📋 **Cookie import** | Pasting a `.ROBLOSECURITY` cookie still works, one at a time or in bulk. |
+
 ### Organisation
 | | |
 |---|---|
@@ -107,18 +115,31 @@ all from a clean, modern desktop app.
 
 ## 🚀 Quick start
 
-1. **Add account** → paste the account's `.ROBLOSECURITY` cookie. It is validated against Roblox before being stored.
+1. **Add account** → type the account's Roblox **username and password**. The session is fetched from
+   Roblox and validated before the account is stored.
 2. Select the account — details and launch options appear on the right.
 3. Enter a **Place ID** (game preview loads automatically) and press **Launch**.
 4. Organise: set an **Alias**, a **Description**, pick or create a **Group** on the fly.
 
 <div align="center"><img src="docs/add-account.png" width="440" alt="Add account dialog"></div>
 
-### Getting a cookie
+### What happens to the password
 
-The `.ROBLOSECURITY` cookie identifies a logged-in account. Log into the account in a browser,
-open the cookies for `roblox.com` and copy the `.ROBLOSECURITY` value
-(starts with `_|WARNING:-DO-NOT-SHARE-THIS...`).
+It is posted to Roblox's own login endpoint (`auth.roblox.com`) over HTTPS and to nothing else. It is
+never written to disk, never logged, and gone the moment the dialog closes — only the session cookie
+Roblox returns is stored, encrypted like every other account.
+
+If the account uses **two-step verification**, the dialog asks for the 6-digit code and finishes the
+same sign-in. If Roblox demands a **captcha** — it does that for some accounts and some networks, and
+no application can answer one on your behalf — use **Sign in in a browser window instead**: the
+genuine Roblox login page opens in a throw-away browser profile, and the session is picked up the
+moment you are logged in. That profile is wiped when the window closes.
+
+### Using a cookie instead
+
+The **Paste cookie** tab takes a `.ROBLOSECURITY` value directly, which is still the fastest route if
+you already have one — log into the account in a browser, open the cookies for `roblox.com` and copy
+the `.ROBLOSECURITY` value (starts with `_|WARNING:-DO-NOT-SHARE-THIS...`).
 
 > [!CAUTION]
 > Never share this cookie with anyone or paste it into websites. Whoever has it controls the account.
@@ -131,6 +152,7 @@ Account cookies are the keys to your accounts — this app treats them according
 
 - **Encrypted at rest.** The account file is encrypted with **Windows DPAPI** (tied to your Windows user) by default, or with a **master password** you set (AES-256-GCM + PBKDF2) from Settings.
 - **Never plain text.** On top of the file encryption, each cookie is individually DPAPI-encrypted — even the decrypted store never contains a readable cookie.
+- **Passwords are not stored.** A sign-in posts the password to Roblox's own login endpoint and keeps nothing: no file, no log, no memory beyond the open dialog. Only the returned session cookie is persisted.
 - **Local only.** No server, no sync, no telemetry. The app talks exclusively to official Roblox APIs over HTTPS.
 - **Validated on startup.** Cookies are re-checked against Roblox so dead sessions are flagged immediately.
 - **Open source.** Every line that touches your cookies is in this repository — audit it, build it yourself.
@@ -159,6 +181,15 @@ dotnet publish src\RobloxAccountManager.csproj `
 ```
 
 Produces a single portable `dist\Roblox Account Manager.exe` — copy anywhere, double-click, done.
+
+### Cutting a release
+
+The changelog lives in a single [`CHANGELOG.md`](CHANGELOG.md); the build embeds it and the app
+slices out the section matching the version it is running.
+
+1. Add a `## vX.Y.Z — YYYY-MM-DD` section at the top of `CHANGELOG.md`.
+2. Set `<Version>` in `src/RobloxAccountManager.csproj` to the same number.
+3. Publish with the command above and attach the exe to a GitHub release tagged `vX.Y.Z`.
 
 ### Tech overview
 
@@ -189,6 +220,8 @@ Shipped:
 - [x] **Localisation** — English + German
 - [x] **CLI companion** — `ram launch --account <alias> --place <id>` for scripting
 
+- [x] **Sign in with username & password** — the cookie is fetched automatically, 2FA included *(v1.6.0)*
+
 Still open:
 
 - [ ] **Account health panel** — cookie age, last validation, expiry warnings
@@ -204,6 +237,12 @@ Still open:
 <summary><b>Is this safe? Where do my cookies go?</b></summary>
 
 Nowhere. Everything is stored encrypted on your own disk and only sent to official `roblox.com` endpoints for validation and launching — same as your browser does. The full source is in this repo.
+</details>
+
+<details>
+<summary><b>What happens to my password when I sign in?</b></summary>
+
+It goes to `auth.roblox.com` — Roblox's own login endpoint — over HTTPS, and to nowhere else. It is never written to disk, never logged and not kept after the dialog closes; only the session cookie Roblox returns is stored, encrypted like every other account. If you would rather not type it into the app at all, use **Sign in in a browser window instead**: the real Roblox login page opens in a throw-away browser profile and the session is picked up automatically. The relevant code is [`RobloxAuthService.cs`](src/Services/RobloxAuthService.cs).
 </details>
 
 <details>

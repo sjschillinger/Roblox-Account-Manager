@@ -43,6 +43,20 @@ internal static class ReleaseNotesRenderer
                 continue;
             }
 
+            // A horizontal rule separates versions in the full changelog; drawing it as a line
+            // beats printing a literal "---".
+            string bare = line.Trim();
+            if (bare.Length >= 3 && (bare.All(c => c == '-') || bare.All(c => c == '*') || bare.All(c => c == '_')))
+            {
+                target.Children.Add(new Border
+                {
+                    Height = 1,
+                    Margin = new Thickness(0, 10, 0, 10),
+                    Background = Brush("HairlineStrongBrush"),
+                });
+                continue;
+            }
+
             if (line.StartsWith('#'))
             {
                 var heading = Line("", muted: false);
@@ -56,6 +70,18 @@ internal static class ReleaseNotesRenderer
             }
 
             string trimmed = line.TrimStart();
+
+            // Blockquote: keep the text, drop the ">" and set it apart.
+            if (trimmed.StartsWith(">"))
+            {
+                var quote = Line("", muted: true);
+                quote.Margin = new Thickness(10, 2, 0, 2);
+                quote.FontStyle = FontStyles.Italic;
+                AddInlines(quote, trimmed.TrimStart('>', ' '));
+                target.Children.Add(quote);
+                continue;
+            }
+
             bool bullet = trimmed.StartsWith("- ") || trimmed.StartsWith("* ");
             var block = Line("", muted: false);
             if (bullet)

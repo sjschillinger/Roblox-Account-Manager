@@ -71,11 +71,19 @@ public static class DialogService
         return dlg.ShowDialog() == true ? dlg.ResultText : null;
     }
 
-    /// <summary>Shows the Chromium download dialog. Returns true if Chromium is installed afterwards.</summary>
-    public static bool ShowChromiumDownload()
+    /// <summary>
+    /// Shows the Chromium download dialog. Returns true if Chromium is installed afterwards.
+    /// <paramref name="owner"/> matters when this is raised from another modal dialog: without it
+    /// the download window is parented to the main window and can open behind the dialog that
+    /// asked for it, which looks exactly like a freeze.
+    /// </summary>
+    public static bool ShowChromiumDownload(Window? owner = null)
     {
         var dlg = new ChromiumDownloadDialog();
-        AttachOwner(dlg);
+        if (owner != null && owner != dlg && owner.IsVisible)
+            dlg.Owner = owner;
+        else
+            AttachOwner(dlg);
         dlg.ShowDialog();
         return dlg.Installed;
     }

@@ -28,17 +28,27 @@ public static class CookieHealthService
             await gate.WaitAsync();
             try
             {
-                var id = await RobloxApi.GetAuthenticatedUserAsync(acc.Cookie);
-                bool ok = id != null;
-                acc.IsValid = ok;
-                if (!ok) Interlocked.Increment(ref invalid);
+                // The detailed lookup separates "Roblox refused this cookie" (401/403) from
+                // "the request did not get through" — a 429 while several accounts are checked at
+                // once, a 5xx, a DNS hiccup. Only the first is proof the session is dead; the
+                // plain lookup returns null for all of them and used to mark healthy accounts
+                // invalid whenever the network wobbled.
+                var (id, rejected) = await RobloxApi.GetAuthenticatedUserDetailedAsync(acc.Cookie);
 
-                // Backfill identity fields when we learn them and they were blank.
-                if (ok)
+                if (id != null)
                 {
-                    if (acc.UserId == 0) acc.UserId = id!.Id;
-                    if (string.IsNullOrWhiteSpace(acc.Username)) acc.Username = id!.Name;
+                    acc.IsValid = true;
+
+                    // Backfill identity fields when we learn them and they were blank.
+                    if (acc.UserId == 0) acc.UserId = id.Id;
+                    if (string.IsNullOrWhiteSpace(acc.Username)) acc.Username = id.Name;
                 }
+                else if (rejected)
+                {
+                    acc.IsValid = false;
+                    Interlocked.Increment(ref invalid);
+                }
+                // else: inconclusive — keep whatever IsValid already said.
             }
             catch { /* transient network failure — keep prior IsValid */ }
             finally

@@ -40,7 +40,7 @@
                 </Border>
             </Grid>
 
-            <TextBlock Grid.Row="1" Margin="0,8,0,12" FontSize="11"
+            <TextBlock Grid.Row="1" x:Name="SubtitleText" Margin="0,8,0,12" FontSize="11"
                        Text="The update was installed successfully. Here's what changed:"
                        Foreground="{DynamicResource TextMutedBrush}" />
 
@@ -48,15 +48,20 @@
             <Border Grid.Row="2" CornerRadius="10"
                     Background="{DynamicResource SurfaceBrush}"
                     BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="14,10">
+                <ScrollViewer x:Name="NotesScroll" VerticalScrollBarVisibility="Auto" Padding="14,10">
                     <StackPanel x:Name="NotesPanel" Margin="0,0,6,4" />
                 </ScrollViewer>
             </Border>
 
             <!-- Footer -->
             <Grid Grid.Row="3" Margin="0,16,0,0">
-                <Button Style="{StaticResource GhostButton}" Content="View on GitHub ↗"
-                        HorizontalAlignment="Left" Click="ViewOnGitHub_Click" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                    <Button x:Name="HistoryBtn" Style="{StaticResource GhostButton}" Content="Full changelog"
+                            Click="ToggleHistory_Click" Visibility="Collapsed"
+                            ToolTip="Every past version, read from the copy shipped inside this build — works offline." />
+                    <Button Style="{StaticResource GhostButton}" Content="View on GitHub ↗"
+                            Margin="8,0,0,0" Click="ViewOnGitHub_Click" />
+                </StackPanel>
                 <Button Style="{StaticResource PrimaryButton}" Content="Close"
                         HorizontalAlignment="Right" Click="Close_Click" />
             </Grid>

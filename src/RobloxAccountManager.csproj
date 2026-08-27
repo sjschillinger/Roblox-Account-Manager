@@ -11,7 +11,7 @@
     <RootNamespace>RobloxAccountManager</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <Version>1.5.1</Version>
+    <Version>1.6.0</Version>
     <Product>Roblox Account Manager</Product>
     <Company>RAM</Company>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -31,16 +31,21 @@
     <Resource Include="Assets\app.ico" />
   </ItemGroup>
 
-  <!-- Ship this version's changelog inside the exe.
+  <!-- Ship the changelog inside the exe.
        "What's new" used to have exactly one source: the GitHub release for the running version.
        That fails whenever the release hasn't been published yet, the machine is offline, or the
        unauthenticated GitHub API (60 requests/hour per IP) is exhausted — and the window then
        showed "Release notes could not be loaded" with nothing else to offer. The notes are in
-       the repo already, so bake them in and treat the network as an enhancement. -->
+       the repo already, so bake them in and treat the network as an enhancement.
+
+       The whole CHANGELOG.md goes in rather than a per-version file: UpdateService slices out the
+       section matching the running version, and the rest backs the "Full changelog" view. Cutting
+       a release is then one section plus a <Version> bump — there is no second file to forget,
+       which used to mean shipping a build with no changelog at all. -->
   <ItemGroup>
-    <EmbeddedResource Include="..\release_notes_v$(Version).md"
-                      Condition="Exists('..\release_notes_v$(Version).md')"
-                      LogicalName="ReleaseNotes.md" />
+    <EmbeddedResource Include="..\CHANGELOG.md"
+                      Condition="Exists('..\CHANGELOG.md')"
+                      LogicalName="Changelog.md" />
   </ItemGroup>
 
   <ItemGroup>

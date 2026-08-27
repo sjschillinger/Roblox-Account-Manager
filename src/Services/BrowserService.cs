@@ -83,6 +83,150 @@ public static class BrowserService
         }
     }
 
+    /// <summary>Result of a browser sign-in: the captured session cookie, or why it did not happen.</summary>
+    public sealed record LoginCapture(bool Success, string Message, string? Cookie);
+
+    /// <summary>
+    /// Opens the real Roblox login page in a throw-away CloakBrowser profile and waits for the
+    /// user to finish signing in, then reads the resulting <c>.ROBLOSECURITY</c> cookie straight
+    /// out of the browser over the DevTools protocol.
+    ///
+    /// This is the fallback whenever <see cref="RobloxAuthService"/> cannot complete a login on its
+    /// own — a captcha, a device confirmation, a security question — because those can only be
+    /// answered by a human in a real browser. The password is typed into Roblox's own page and
+    /// never passes through this application at all.
+    ///
+    /// The profile is created fresh for this sign-in and wiped when the window closes, so the
+    /// session never stays readable on disk.
+    /// </summary>
+    public static async Task<LoginCapture> CaptureLoginCookieAsync(IProgress<string>? progress, CancellationToken ct)
+    {
+        if (!ChromiumService.IsInstalled) return new(false, "no-chromium", null);
+
+        string profileDir = Paths.InData(Path.Combine("browser", "login-" + Guid.NewGuid().ToString("N")));
+        Process? proc = null;
+        ClientWebSocket? socket = null;
+
+        try
+        {
+            Directory.CreateDirectory(profileDir);
+            int port = FreePort();
+
+            var psi = new ProcessStartInfo(ChromiumService.ChromePath)
+            {
+                UseShellExecute = false,
+                Arguments = $"--user-data-dir=\"{profileDir}\" --remote-debugging-port={port} "
+                          + "--no-first-run --no-default-browser-check --new-window https://www.roblox.com/login"
+            };
+            proc = Process.Start(psi);
+            progress?.Report("Opening the Roblox sign-in page…");
+
+            // The browser-level endpoint is used rather than a page target: it survives every
+            // navigation the login flow performs and emits almost no events, so a cookie poll is
+            // a clean request/response.
+            string? wsUrl = await WaitForBrowserSocketAsync(port, TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+            bool pageTarget = false;
+            if (wsUrl == null)
+            {
+                wsUrl = await WaitForPageSocketAsync(port, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                pageTarget = wsUrl != null;
+            }
+            if (wsUrl == null)
+                return new(false, "The sign-in window opened but its debugger did not respond.", null);
+
+            socket = new ClientWebSocket();
+            await socket.ConnectAsync(new Uri(wsUrl), ct).ConfigureAwait(false);
+
+            int id = 0;
+            string method = pageTarget ? "Network.getAllCookies" : "Storage.getCookies";
+            if (pageTarget) (await CallAsync(socket, ++id, "Network.enable", new { }, ct).ConfigureAwait(false))?.Dispose();
+
+            progress?.Report("Waiting for you to sign in…");
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                if (proc != null && proc.HasExited)
+                    return new(false, "The sign-in window was closed before the login finished.", null);
+
+                var (cookie, unsupported) = await TryReadSessionCookieAsync(socket, ++id, method, ct).ConfigureAwait(false);
+                if (cookie != null)
+                {
+                    progress?.Report("Signed in — checking the account…");
+                    return new(true, "Signed in.", cookie);
+                }
+
+                // Some Chromium builds do not expose Storage.getCookies on the browser target.
+                // Switch to a page target's Network domain once, then keep polling.
+                if (unsupported && !pageTarget)
+                {
+                    string? pageWs = await WaitForPageSocketAsync(port, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                    if (pageWs == null)
+                        return new(false, "The sign-in window did not expose a readable page.", null);
+
+                    try { socket.Dispose(); } catch { }
+                    socket = new ClientWebSocket();
+                    await socket.ConnectAsync(new Uri(pageWs), ct).ConfigureAwait(false);
+                    pageTarget = true;
+                    method = "Network.getAllCookies";
+                    (await CallAsync(socket, ++id, "Network.enable", new { }, ct).ConfigureAwait(false))?.Dispose();
+                    continue;
+                }
+
+                await Task.Delay(1200, ct).ConfigureAwait(false);
+            }
+
+            return new(false, "Timed out waiting for the sign-in to finish.", null);
+        }
+        catch (OperationCanceledException)
+        {
+            return new(false, "Sign-in cancelled.", null);
+        }
+        catch (Exception ex)
+        {
+            return new(false, $"Browser sign-in failed: {ex.Message}", null);
+        }
+        finally
+        {
+            try { socket?.Dispose(); } catch { }
+            try { if (proc is { HasExited: false }) proc.Kill(entireProcessTree: true); } catch { }
+            try { proc?.Dispose(); } catch { }
+            WipeProfileWithRetry(profileDir);
+        }
+    }
+
+    /// <summary>
+    /// One cookie poll. Returns the session cookie once it exists; <c>unsupported</c> says the
+    /// CDP method itself was refused, which is the signal to switch targets rather than keep
+    /// asking a question this browser will never answer.
+    /// </summary>
+    private static async Task<(string? cookie, bool unsupported)> TryReadSessionCookieAsync(
+        ClientWebSocket socket, int id, string method, CancellationToken ct)
+    {
+        using var doc = await CallAsync(socket, id, method, new { }, ct).ConfigureAwait(false);
+        if (doc == null) return (null, false);
+
+        var root = doc.RootElement;
+        if (root.TryGetProperty("error", out _)) return (null, true);
+        if (!root.TryGetProperty("result", out var result)) return (null, false);
+        if (!result.TryGetProperty("cookies", out var cookies) || cookies.ValueKind != JsonValueKind.Array)
+            return (null, false);
+
+        foreach (var c in cookies.EnumerateArray())
+        {
+            string name = c.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+            if (!string.Equals(name, ".ROBLOSECURITY", StringComparison.Ordinal)) continue;
+
+            string value = c.TryGetProperty("value", out var v) ? v.GetString() ?? "" : "";
+            // A logged-out placeholder has no warning prefix; only a real session does.
+            if (value.Contains("WARNING", StringComparison.Ordinal)) return (value, false);
+        }
+
+        return (null, false);
+    }
+
     /// <summary>
     /// Deletes leftover app-browser profiles under data/browser. Runs at app start and exit so
     /// no cookie/site data from a previous session stays readable on disk (crash leftovers and
@@ -182,6 +326,74 @@ public static class BrowserService
             catch { }
             await Task.Delay(250);
         }
+        return null;
+    }
+
+    /// <summary>
+    /// Browser-level DevTools endpoint. Unlike a page socket it is not tied to a tab, so it
+    /// survives every navigation and reload the login flow goes through.
+    /// </summary>
+    private static async Task<string?> WaitForBrowserSocketAsync(int port, TimeSpan timeout)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        var deadline = DateTime.UtcNow + timeout;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                string json = await http.GetStringAsync($"http://127.0.0.1:{port}/json/version");
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("webSocketDebuggerUrl", out var ws))
+                {
+                    string? url = ws.GetString();
+                    if (!string.IsNullOrEmpty(url)) return url;
+                }
+            }
+            catch { }
+            await Task.Delay(250);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Sends one DevTools command and waits for the reply with the matching id, skipping the
+    /// protocol events that arrive in between. Returns null if nothing answered in time — the
+    /// caller simply polls again.
+    /// </summary>
+    private static async Task<JsonDocument?> CallAsync(ClientWebSocket socket, int id, string method,
+        object @params, CancellationToken ct)
+    {
+        string payload = JsonSerializer.Serialize(new { id, method, @params });
+        var outgoing = Encoding.UTF8.GetBytes(payload);
+        await socket.SendAsync(outgoing, WebSocketMessageType.Text, true, ct);
+
+        var buffer = new byte[32 * 1024];
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+
+        while (DateTime.UtcNow < deadline && socket.State == WebSocketState.Open)
+        {
+            var sb = new StringBuilder();
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
+                if (result.MessageType == WebSocketMessageType.Close) return null;
+                sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
+            }
+            while (!result.EndOfMessage);
+
+            JsonDocument doc;
+            try { doc = JsonDocument.Parse(sb.ToString()); }
+            catch { continue; }
+
+            if (doc.RootElement.TryGetProperty("id", out var replyId)
+                && replyId.TryGetInt32(out int got) && got == id)
+                return doc;
+
+            doc.Dispose();   // an unrelated protocol event
+        }
+
         return null;
     }
 

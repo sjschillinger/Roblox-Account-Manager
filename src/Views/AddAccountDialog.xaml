@@ -21,6 +21,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,4">
@@ -32,37 +33,84 @@
                     <TextBlock Text="Add account" Style="{StaticResource DisplayText}" FontSize="16" />
                 </StackPanel>
             </StackPanel>
-            <TextBlock Grid.Row="1" Style="{StaticResource Label}" TextWrapping="Wrap" Margin="0,6,0,14"
-                       Text="Paste the account's .ROBLOSECURITY cookie. It's checked against Roblox before it's added." />
 
-            <Grid Grid.Row="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                <Grid Grid.Row="0" Margin="0,0,0,6">
-                    <TextBlock Text="Cookie" Style="{StaticResource Label}" VerticalAlignment="Center" />
-                    <Button x:Name="PasteBtn" HorizontalAlignment="Right" Style="{StaticResource IconButton}"
-                            Width="Auto" Height="26" Padding="8,0" Click="Paste_Click" ToolTip="Paste from clipboard">
-                        <StackPanel Orientation="Horizontal">
-                            <Path Data="{StaticResource Icon.Copy}" Style="{StaticResource IconPath}" Width="13" Height="13" />
-                            <TextBlock Text="Paste" Margin="6,0,0,0" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
-                        </StackPanel>
-                    </Button>
+            <!-- How the account gets in: sign in, or paste a cookie the user already has. -->
+            <Border Grid.Row="1" Margin="0,14,0,0" CornerRadius="{StaticResource RadiusMd}" Padding="3"
+                    Background="{DynamicResource SurfaceAltBrush}"
+                    BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="SignInTab" Grid.Column="0" Height="32" Content="Sign in"
+                            Style="{StaticResource PrimaryButton}" Click="SignInTab_Click" />
+                    <Button x:Name="CookieTab" Grid.Column="1" Height="32" Content="Paste cookie"
+                            Style="{StaticResource GhostButton}" Click="CookieTab_Click" />
                 </Grid>
-                <Border Grid.Row="1" CornerRadius="{StaticResource RadiusMd}" Height="104"
-                        Background="{DynamicResource SurfaceAltBrush}"
-                        BorderBrush="{DynamicResource HairlineStrongBrush}" BorderThickness="1">
-                    <TextBox x:Name="CookieBox" Background="Transparent" BorderThickness="0"
-                             AcceptsReturn="True" TextWrapping="Wrap" Height="102"
-                             VerticalContentAlignment="Top" Padding="12,9"
-                             VerticalScrollBarVisibility="Auto" FontFamily="{StaticResource MonoFont}"
-                             FontSize="12" TextChanged="Cookie_Changed" />
-                </Border>
+            </Border>
+
+            <TextBlock Grid.Row="2" x:Name="ModeHint" Style="{StaticResource Label}" TextWrapping="Wrap"
+                       Margin="0,12,0,14"
+                       Text="Sign in with the account's Roblox username and password. The session is fetched automatically — you never have to find a cookie yourself." />
+
+            <Grid Grid.Row="3">
+                <!-- Sign in with credentials -->
+                <StackPanel x:Name="SignInPanel">
+                    <TextBlock Text="Roblox username" Style="{StaticResource Label}" Margin="0,0,0,6" />
+                    <TextBox x:Name="UserBox" TextChanged="Credentials_Changed" />
+
+                    <TextBlock Text="Password" Style="{StaticResource Label}" Margin="0,12,0,6" />
+                    <PasswordBox x:Name="PassBox" PasswordChanged="Password_Changed" />
+
+                    <!-- Shown only once Roblox asks for a two-step code. -->
+                    <StackPanel x:Name="TwoFactorPanel" Visibility="Collapsed">
+                        <TextBlock x:Name="TwoFactorLabel" Text="Verification code" Style="{StaticResource Label}"
+                                   Margin="0,12,0,6" TextWrapping="Wrap" />
+                        <TextBox x:Name="CodeBox" MaxLength="8" FontFamily="{StaticResource MonoFont}"
+                                 TextChanged="Credentials_Changed" />
+                    </StackPanel>
+
+                    <TextBlock Margin="0,12,0,0" FontSize="11.5" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextMutedBrush}"
+                               Text="The password is sent only to Roblox's own login endpoint and is never saved, logged or reused. Only the session cookie Roblox returns is stored." />
+
+                    <Button x:Name="BrowserBtn" Style="{StaticResource GhostButton}" Height="32" Margin="0,12,0,0"
+                            HorizontalAlignment="Left" Padding="12,0" Click="BrowserLogin_Click"
+                            Content="Sign in in a browser window instead"
+                            ToolTip="Opens the real Roblox login page in a throw-away browser profile and picks the session up automatically. Use this when Roblox asks for a captcha." />
+                </StackPanel>
+
+                <!-- Paste an existing cookie -->
+                <Grid x:Name="CookiePanel" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Margin="0,0,0,6">
+                        <TextBlock Text="Cookie" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                        <Button x:Name="PasteBtn" HorizontalAlignment="Right" Style="{StaticResource IconButton}"
+                                Width="Auto" Height="26" Padding="8,0" Click="Paste_Click" ToolTip="Paste from clipboard">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Data="{StaticResource Icon.Copy}" Style="{StaticResource IconPath}" Width="13" Height="13" />
+                                <TextBlock Text="Paste" Margin="6,0,0,0" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                    <Border Grid.Row="1" CornerRadius="{StaticResource RadiusMd}" Height="104"
+                            Background="{DynamicResource SurfaceAltBrush}"
+                            BorderBrush="{DynamicResource HairlineStrongBrush}" BorderThickness="1">
+                        <TextBox x:Name="CookieBox" Background="Transparent" BorderThickness="0"
+                                 AcceptsReturn="True" TextWrapping="Wrap" Height="102"
+                                 VerticalContentAlignment="Top" Padding="12,9"
+                                 VerticalScrollBarVisibility="Auto" FontFamily="{StaticResource MonoFont}"
+                                 FontSize="12" TextChanged="Cookie_Changed" />
+                    </Border>
+                </Grid>
             </Grid>
 
             <!-- status line -->
-            <Border Grid.Row="3" x:Name="StatusBar" Margin="0,12,0,0" CornerRadius="{StaticResource RadiusSm}"
+            <Border Grid.Row="4" x:Name="StatusBar" Margin="0,12,0,0" CornerRadius="{StaticResource RadiusSm}"
                     Padding="10,8" Visibility="Collapsed">
                 <StackPanel Orientation="Horizontal">
                     <Path x:Name="StatusIcon" Width="15" Height="15" Stretch="Uniform" StrokeThickness="1.8"
@@ -72,10 +120,10 @@
                 </StackPanel>
             </Border>
 
-            <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+            <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
                 <Button x:Name="CancelBtn" Style="{StaticResource GhostButton}" Content="Cancel"
                         Width="104" Margin="0,0,10,0" Click="Cancel_Click" />
-                <Button x:Name="AddBtn" Style="{StaticResource PrimaryButton}" Content="Add account"
+                <Button x:Name="AddBtn" Style="{StaticResource PrimaryButton}" Content="Sign in"
                         Width="140" Click="Add_Click" IsDefault="True" />
             </StackPanel>
         </Grid>

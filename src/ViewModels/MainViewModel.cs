@@ -314,7 +314,7 @@ public class MainViewModel : ObservableObject
             if (dispatcher == null) return;
             await dispatcher.InvokeAsync(() =>
             {
-                var win = new Views.WhatsNewWindow(current, notes?.Notes, notes?.PageUrl);
+                var win = new Views.WhatsNewWindow(current, notes?.Notes, notes?.PageUrl, postUpdate: true);
                 if (Application.Current?.MainWindow is { IsVisible: true } owner) win.Owner = owner;
                 win.ShowDialog();
             });

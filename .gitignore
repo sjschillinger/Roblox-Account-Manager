@@ -19,11 +19,24 @@ error.log
 *.log
 
 # ---------------------------------------------------------------------------
+#  Secrets — a stray token/credential file must never reach the repo
+# ---------------------------------------------------------------------------
+*.pfx
+*.snk
+secrets.json
+appsettings.*.local.json
+.env
+.env.*
+
+# ---------------------------------------------------------------------------
 #  OS / editor cruft
 # ---------------------------------------------------------------------------
 Thumbs.db
 desktop.ini
 .DS_Store
+.idea/
+*.swp
+*~
 
 # Dev-Build/Release-Skripte (nicht im oeffentlichen Repo)
 publish.ps1
@@ -37,8 +50,10 @@ release.ps1
 # ---------------------------------------------------------------------------
 icon.png
 
-# Temp release notes
+# Temp release notes. The changelog itself lives in CHANGELOG.md and IS tracked — the build
+# embeds it, so leaving it out ships a build with no "What's new" content.
 _relnotes_*.md
+release_notes_v*.md
 
 # Publish-Output
 publish/
