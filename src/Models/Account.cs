@@ -95,6 +95,22 @@ public class Account : ObservableObject
     private bool _isChecked;
     [JsonIgnore] public bool IsChecked { get => _isChecked; set => SetField(ref _isChecked, value); }
 
+    // ---- playtime (runtime; filled from PlaytimeService, already formatted) ----
+    // The strings arrive pre-rendered so the model stays free of any service dependency and the
+    // list can bind straight to them.
+    private string _playtimeTotalText = "—";
+    [JsonIgnore] public string PlaytimeTotalText { get => _playtimeTotalText; set => SetField(ref _playtimeTotalText, value); }
+
+    private string _playtime7dText = "—";
+    [JsonIgnore] public string Playtime7dText { get => _playtime7dText; set => SetField(ref _playtime7dText, value); }
+
+    private string _lastPlayedText = "never";
+    [JsonIgnore] public string LastPlayedText { get => _lastPlayedText; set => SetField(ref _lastPlayedText, value); }
+
+    private bool _hasPlaytime;
+    /// <summary>False until the account has at least one recorded session — hides the badge.</summary>
+    [JsonIgnore] public bool HasPlaytime { get => _hasPlaytime; set => SetField(ref _hasPlaytime, value); }
+
     [JsonIgnore] public string DisplayNameOrUser => string.IsNullOrEmpty(Alias) ? (string.IsNullOrEmpty(Username) ? "Unknown" : Username) : Alias;
     [JsonIgnore] public string Initials
     {

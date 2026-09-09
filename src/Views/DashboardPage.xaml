@@ -82,7 +82,7 @@
         </UniformGrid>
 
         <!-- ============ Economy strip ============ -->
-        <UniformGrid Grid.Row="2" Rows="1" Columns="3" Margin="0,10,0,0">
+        <UniformGrid Grid.Row="2" Rows="1" Columns="4" Margin="0,10,0,0">
             <Border Style="{StaticResource Card}" Margin="0,0,6,0">
                 <StackPanel>
                     <TextBlock Text="TOTAL ROBUX" Style="{StaticResource Label}" />
@@ -97,10 +97,18 @@
                                Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
                 </StackPanel>
             </Border>
-            <Border Style="{StaticResource Card}" Margin="6,0,0,0">
+            <Border Style="{StaticResource Card}" Margin="3,0,3,0">
                 <StackPanel>
                     <TextBlock Text="PREMIUM" Style="{StaticResource Label}" />
                     <TextBlock Text="{Binding PremiumCount}" FontSize="24" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" Margin="6,0,0,0"
+                    ToolTip="{Binding PlaytimeTotalText, StringFormat='{}{0} recorded in total'}">
+                <StackPanel>
+                    <TextBlock Text="PLAYTIME · 7 DAYS" Style="{StaticResource Label}" />
+                    <TextBlock Text="{Binding PlaytimeWeekText}" FontSize="24" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
                 </StackPanel>
             </Border>
@@ -137,6 +145,11 @@
                                                 Visibility="{Binding IsPremium, Converter={StaticResource BoolToVis}}">
                                             <TextBlock Text="PREMIUM" Foreground="White" FontSize="9" FontWeight="Bold" />
                                         </Border>
+                                        <TextBlock Text="{Binding Playtime7dText, StringFormat='7d {0}'}"
+                                                   Foreground="{DynamicResource TextMutedBrush}" FontSize="12"
+                                                   VerticalAlignment="Center" Margin="0,0,14,0"
+                                                   ToolTip="{Binding LastPlayedText, StringFormat='Last played {0}'}"
+                                                   Visibility="{Binding HasPlaytime, Converter={StaticResource BoolToVis}}" />
                                         <TextBlock Text="{Binding RobuxDisplay, StringFormat='R$ {0}'}"
                                                    Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"
                                                    VerticalAlignment="Center" Margin="0,0,14,0" />

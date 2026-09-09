@@ -124,6 +124,25 @@ public class AppSettings
     public bool AuditLogEnabled { get; set; } = false;          // append security events to data/audit.log
     public bool RotationDetectionEnabled { get; set; } = true;  // capture rotated .ROBLOSECURITY on launch
 
+    // ---- Updates ----
+    // The update check used to be unconditional and ran every 5 minutes with no way to turn it
+    // off, which burns GitHub's 60-requests-per-hour anonymous budget for no benefit on a machine
+    // that stays open all day. All of it is user-controlled now.
+    public bool AutoCheckUpdates { get; set; } = true;          // background poll on/off
+    public bool CheckUpdatesOnStartup { get; set; } = true;     // one check when the app opens
+    public int UpdateCheckMinutes { get; set; } = 60;           // background poll interval (>= 15)
+    public bool IncludePrereleases { get; set; } = false;       // offer releases marked "pre-release"
+    public string SkippedUpdateVersion { get; set; } = "";      // "v1.7.1" — never prompt for this one again
+    public bool VerifyUpdateDownload { get; set; } = true;      // hash/size/PE checks before the swap
+    public bool KeepUpdateBackup { get; set; } = true;          // keep <exe>.bak so a rollback is possible
+
+    // ---- Windows startup ----
+    public bool StartWithWindows { get; set; } = false;         // HKCU ...\CurrentVersion\Run entry
+    public bool StartMinimized { get; set; } = false;           // launch straight to the tray
+
+    // ---- Playtime ----
+    public bool TrackPlaytime { get; set; } = true;             // record per-account client sessions
+
     // ---- housekeeping ----
     public double WindowWidth { get; set; } = 1120;
     public double WindowHeight { get; set; } = 720;

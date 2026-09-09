@@ -4,7 +4,7 @@
         xmlns:ram="clr-namespace:RobloxAccountManager"
         Title="Updating Roblox Account Manager"
         Icon="pack://application:,,,/Assets/app.ico"
-        Width="440" Height="240"
+        Width="460" Height="264"
         WindowStyle="None" ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource CanvasBrush}"
@@ -37,6 +37,11 @@
             <TextBlock x:Name="StatusText" Grid.Row="1" Margin="0,10,0,0" Text="Preparing…"
                        FontSize="12" TextWrapping="Wrap"
                        Foreground="{DynamicResource TextSecondaryBrush}" />
+
+            <!-- Transferred / speed / ETA -->
+            <TextBlock x:Name="DetailText" Grid.Row="2" Margin="0,6,0,0" Text=""
+                       FontSize="11" TextWrapping="Wrap" VerticalAlignment="Top"
+                       Foreground="{DynamicResource TextMutedBrush}" />
 
             <!-- Progress -->
             <Grid Grid.Row="3" Margin="0,0,0,16">

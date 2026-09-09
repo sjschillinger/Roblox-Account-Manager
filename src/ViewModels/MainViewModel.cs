@@ -90,6 +90,9 @@ public class MainViewModel : ObservableObject
 
     public RelayCommand UpdateNowCommand { get; }
 
+    /// <summary>Dismisses the offered version for good — no pill, no prompt, until a newer one lands.</summary>
+    public RelayCommand SkipUpdateCommand { get; }
+
     public MainViewModel()
     {
         NavCommand = new RelayCommand(p =>
@@ -115,24 +118,66 @@ public class MainViewModel : ObservableObject
         };
 
         UpdateNowCommand = new RelayCommand(UpdateNow, () => UpdateAvailable);
+        SkipUpdateCommand = new RelayCommand(_ => SkipUpdate(), _ => UpdateAvailable);
 
         // Fire-and-forget update check on startup, at most once per run; failures are silent.
-        if (!s_updateCheckStarted)
+        if (!s_updateCheckStarted && SettingsService.Current.CheckUpdatesOnStartup)
         {
             s_updateCheckStarted = true;
             _ = CheckForUpdateAsync();
         }
 
-        // Then keep polling every 5 minutes so a freshly published release is picked up
-        // without hammering GitHub with a request every single minute. The modal only
-        // appears once per version (see CheckForUpdateAsync); the title-bar pill just stays
-        // put, so the recurring check never nags the user.
-        _updateTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
-        _updateTimer.Tick += (_, _) => _ = CheckForUpdateAsync();
-        _updateTimer.Start();
+        ApplyUpdateSchedule();
 
         // "What's new" once after every update — the first run of a freshly installed version.
         _ = ShowWhatsNewIfUpdatedAsync();
+
+        // Playtime history: start recording, then publish the stored totals onto the accounts.
+        PlaytimeService.Start();
+        PlaytimeService.Changed += OnPlaytimeChanged;
+        RefreshPlaytime();
+        Store.Accounts.CollectionChanged += (_, _) => RefreshPlaytime();
+
+        // Portable app: the autostart entry has to keep pointing at wherever the exe lives now.
+        StartupService.Reconcile(SettingsService.Current.StartWithWindows);
+    }
+
+    /// <summary>
+    /// (Re)arms the background update poll from the current settings. Called at startup and again
+    /// whenever the Updates settings change, so a new interval takes effect without a restart.
+    /// </summary>
+    public void ApplyUpdateSchedule()
+    {
+        _updateTimer?.Stop();
+        _updateTimer = null;
+
+        var s = SettingsService.Current;
+        if (!s.AutoCheckUpdates) return;
+
+        // Floor of 15 minutes. GitHub answers an unauthenticated client 60 times an hour per IP,
+        // and that budget is shared with everything else the app asks it — a tighter poll buys
+        // nothing, because releases are not published minute by minute.
+        int minutes = Math.Max(15, s.UpdateCheckMinutes);
+
+        _updateTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
+        _updateTimer.Tick += (_, _) => _ = CheckForUpdateAsync();
+        _updateTimer.Start();
+    }
+
+    // ---- playtime ----
+    private void OnPlaytimeChanged()
+    {
+        var d = Application.Current?.Dispatcher;
+        if (d != null && !d.CheckAccess()) d.BeginInvoke(new Action(RefreshPlaytime));
+        else RefreshPlaytime();
+    }
+
+    /// <summary>Pushes the recorded totals onto the account objects the lists bind to.</summary>
+    public void RefreshPlaytime()
+    {
+        PlaytimeService.Apply(Store.Accounts);
+        Dashboard.RefreshPlaytime();
+        Settings.RefreshPlaytimeStatus();
     }
 
     public void SetStatus(string s) => Status = s;
@@ -162,14 +207,33 @@ public class MainViewModel : ObservableObject
             // No ConfigureAwait(false) anywhere in here on purpose: the command is invoked on the
             // UI thread, so every continuation below resumes there and can touch bindings and
             // show a modal directly.
-            var info = await UpdateService.CheckForUpdateAsync();
+            // ignoreSkip: pressing the button IS the user asking about the version they skipped.
+            var info = await UpdateService.CheckForUpdateAsync(ignoreSkip: true);
 
             string stamp = DateTime.Now.ToString("HH:mm");
+
+            // A spent API budget answers every request identically to "nothing new", which would
+            // otherwise be reported as "you're up to date" — a claim we cannot actually make.
+            if (info == null && UpdateService.IsRateLimited)
+            {
+                string until = UpdateService.RateLimitResetsAt?.ToString("HH:mm") ?? "shortly";
+                UpdateCheckStatus = $"GitHub's hourly request limit is used up — checking again after {until}.";
+                SetStatus("Update check postponed — GitHub rate limit reached.");
+                return;
+            }
+
             if (info == null)
             {
                 UpdateCheckStatus = $"You're on the latest version ({AppInfo.Short}). Last checked {stamp}.";
                 SetStatus($"No update available — {AppInfo.Short} is current.");
                 return;
+            }
+
+            // The user asked explicitly, so an earlier "skip" no longer applies to this version.
+            if (SettingsService.Current.SkippedUpdateVersion == info.VersionText)
+            {
+                SettingsService.Current.SkippedUpdateVersion = "";
+                SettingsService.Save();
             }
 
             Adopt(info);
@@ -190,9 +254,34 @@ public class MainViewModel : ObservableObject
     private void Adopt(UpdateInfo info)
     {
         _update = info;
-        UpdateVersionText = $"Update available — {info.VersionText}";
+        UpdateVersionText = info.IsPrerelease
+            ? $"Pre-release available — {info.VersionText}"
+            : $"Update available — {info.VersionText}";
         OnPropertyChanged(nameof(UpdateAvailable));
         UpdateNowCommand.RaiseCanExecuteChanged();
+        SkipUpdateCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Hides the offered version permanently. Without it the only way to stop being told about a
+    /// release the user does not want is to turn update checks off entirely — and then they miss
+    /// the next one too.
+    /// </summary>
+    private void SkipUpdate()
+    {
+        if (_update is not { } info) return;
+
+        SettingsService.Current.SkippedUpdateVersion = info.VersionText;
+        SettingsService.Save();
+
+        _update = null;
+        _promptedVersion = info.VersionText;
+        UpdateVersionText = "";
+        OnPropertyChanged(nameof(UpdateAvailable));
+        UpdateNowCommand.RaiseCanExecuteChanged();
+        SkipUpdateCommand.RaiseCanExecuteChanged();
+        UpdateCheckStatus = $"{info.VersionText} skipped. You'll be told about the release after it.";
+        SetStatus($"{info.VersionText} skipped.");
     }
 
     private async Task CheckForUpdateAsync()
@@ -264,7 +353,11 @@ public class MainViewModel : ObservableObject
         var win = new Views.UpdatePromptWindow(info);
         if (Application.Current?.MainWindow is { IsVisible: true } owner) win.Owner = owner;
         if (win.ShowDialog() != true)
-            return; // "Later" — keep the pill, do nothing
+        {
+            // "Skip this version" retires the offer for good; "Later" keeps the pill.
+            if (win.Skipped) SkipUpdate();
+            return;
+        }
 
         if (UpdateService.BeginUpdate(info))
         {

@@ -7,7 +7,76 @@ into the exe and shown in **What's new**, so a release no longer needs its own n
 
 1. Add a `## vX.Y.Z — YYYY-MM-DD` section at the top of this file.
 2. Bump `<Version>` in `src/RobloxAccountManager.csproj` to the same number.
-3. Publish. The build embeds this file; the app slices out the matching section at runtime.
+3. Push the tag `vX.Y.Z`. The release workflow builds the exe, publishes its SHA-256 and uses the
+   section you just wrote as the release body — the same section the app embeds and shows in
+   **What's new**.
+
+---
+
+## v1.7.0 — 2026-09-09
+
+### Updating is no longer a leap of faith
+
+The self-updater downloaded a file and copied it straight over the running application. Nothing
+checked that the file was the application, and nothing kept the build being replaced. A download
+truncated by a dropped connection, a GitHub error page returned instead of the binary, a captive
+portal's login page — each of them "succeeded" as far as the transfer was concerned, and each of
+them left an app that would not start and no way back short of reinstalling by hand.
+
+- **Downloads are verified before anything is replaced.** The file must begin like a Windows
+  executable, match the size GitHub reported, and match the SHA-256 published in the release notes.
+  Releases are built by a workflow that computes that checksum from the very binary it uploads.
+- **Your previous version is kept.** The build being replaced is moved aside rather than
+  overwritten, so **Settings → Updates → Restore previous version** puts it back. A swap that fails
+  halfway now undoes itself instead of leaving nothing behind.
+- **Interrupted downloads resume.** Losing the connection at 95 % of 56 MB used to mean starting
+  over; the transfer now continues from where it stopped and retries by itself up to three times.
+- **The progress window says something useful** — transferred, speed and time remaining, rather
+  than a bare percentage.
+- **The right asset is picked.** The updater took the first `.exe` attached to a release, so any
+  second executable added later would silently have become what everyone downloads. It now matches
+  on the asset name.
+
+### You decide when the app looks for updates
+
+There were no update settings at all: the check ran every five minutes, forever, and the only way
+to influence it was not to run the app. **Settings → Updates** is new.
+
+- **Check automatically** on or off, with your own **interval** (default: hourly instead of every
+  five minutes) and an independent **check at startup**.
+- **Skip this version** — on the update prompt, on the title-bar pill's right-click menu, or from
+  Settings. The release stops being offered; the one after it still is. Turning update checks off
+  entirely was previously the only way to stop being asked.
+- **Include pre-releases**, for anyone who wants test builds before they are final.
+- The background check now uses conditional requests, so a poll that finds nothing new costs
+  nothing against GitHub's 60-requests-per-hour anonymous budget. When the budget is spent anyway
+  the app says so and waits, instead of reporting "you're on the latest version" — which it had no
+  way of knowing.
+
+### Start with Windows
+
+A tray application with no way to start with the system. **Settings → Interface → Start with
+Windows** adds an entry under your own user account — no administrator rights, no service — and
+**Start minimized** opens it straight into the tray. The app is portable, so the entry is re-pointed
+at the executable on every start; moving or renaming it no longer leaves a shortcut to nothing.
+
+### Playtime
+
+The app knew exactly when each client started and threw that away when it closed. Sessions are now
+recorded per account, so there is an answer to "how much has this account actually played".
+
+- Total and last-7-days playtime on the **account card**, in the **account details**, and on the
+  **Dashboard**, plus when each account was last played.
+- Stored locally in `data/playtime.json`; six months are kept, sessions under 20 seconds are
+  ignored, and clients still running when you close the app are counted rather than lost.
+- Off with one switch in **Settings → Live data**, and the history can be cleared there.
+
+### Releases are built by GitHub
+
+Every release was produced on one machine and uploaded by hand — which is also why a checksum was
+never published. Pushing a tag now builds the exe on GitHub, fails the build on a single compiler
+warning or a tag that disagrees with the project version, takes the release notes from this file,
+and attaches the binary together with its `SHA256SUMS.txt`.
 
 ---
 

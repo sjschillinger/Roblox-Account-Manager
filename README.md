@@ -56,6 +56,7 @@ all from a clean, modern desktop app.
 | 🗂️ **Groups, aliases & notes** | Structure any number of accounts, see everything at a glance. |
 | 📊 **Live data** | Avatars, presence (online / in-game / studio) and Robux for every account, refreshed automatically. |
 | 🔎 **Instant overview** | Presence updates within seconds of launching or closing a game. |
+| ⏱️ **Playtime tracking** | Records how long each account's client actually runs — totals per account and across the last seven days. |
 
 ### Experience
 | | |
@@ -63,7 +64,8 @@ all from a clean, modern desktop app.
 | 🎨 **Modern UI** | Dark, minimal WPF interface with smooth page transitions, animated buttons and subtle glow effects. |
 | 📥 **System tray** | Close to tray, keep running silently — tray icon and global hotkeys run on native Win32, no WinForms. |
 | 📦 **Zero setup** | One portable, self-contained `.exe` (~56 MB). No .NET install required on the target PC. |
-| 🔄 **Auto-update check** | Notifies you when a new release is available — updating is always your choice. |
+| 🔄 **Verified auto-update** | Notifies you when a release is out, checks its SHA-256 before installing, and keeps the previous build so you can roll back. Interval, pre-release channel and “skip this version” are all yours. |
+| 🚀 **Start with Windows** | Optional per-user autostart, straight into the tray if you want it. |
 
 ### Automation
 | | |
@@ -189,10 +191,24 @@ slices out the section matching the version it is running.
 
 1. Add a `## vX.Y.Z — YYYY-MM-DD` section at the top of `CHANGELOG.md`.
 2. Set `<Version>` in `src/RobloxAccountManager.csproj` to the same number.
-3. Publish with the command above, then tag `vX.Y.Z` and attach the exe to a GitHub release under
-   that tag, named `RobloxAccountManager.exe`. The in-app updater takes the **first `.exe` asset** of
-   the latest release, and shows the release **body** in its update prompt — so paste this version's
-   changelog section in there.
+3. Push the tag:
+
+```powershell
+git tag v1.7.0
+git push origin v1.7.0
+```
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) does the rest: it builds the
+single-file exe on GitHub, refuses the build on a compiler warning or a tag that disagrees with
+`<Version>`, uses your changelog section as the release body, and attaches
+`RobloxAccountManager.exe` together with its `SHA256SUMS.txt`.
+
+Publishing that checksum matters — the in-app updater verifies the download against it before
+anything replaces the running application. A release built and uploaded by hand has no checksum in
+its body, so the updater falls back to the size and executable-header checks alone.
+
+A tag with a suffix (`v1.8.0-beta.1`) is published as a pre-release and only offered to users who
+turned on **Include pre-releases**.
 
 ### Tech overview
 
@@ -224,6 +240,9 @@ Shipped:
 - [x] **CLI companion** — `ram launch --account <alias> --place <id>` for scripting
 
 - [x] **Sign in with username & password** — the cookie is fetched automatically, 2FA included *(v1.6.0)*
+- [x] **Update settings** — interval, pre-release channel, skip a version, verified downloads, roll-back *(v1.7.0)*
+- [x] **Start with Windows** — per-user autostart, optionally straight into the tray *(v1.7.0)*
+- [x] **Playtime tracking** — recorded per account, shown on the cards and the dashboard *(v1.7.0)*
 
 Still open:
 
@@ -246,6 +265,12 @@ Nowhere. Everything is stored encrypted on your own disk and only sent to offici
 <summary><b>What happens to my password when I sign in?</b></summary>
 
 It goes to `auth.roblox.com` — Roblox's own login endpoint — over HTTPS, and to nowhere else. It is never written to disk, never logged and not kept after the dialog closes; only the session cookie Roblox returns is stored, encrypted like every other account. If you would rather not type it into the app at all, use **Sign in in a browser window instead**: the real Roblox login page opens in a throw-away browser profile and the session is picked up automatically. The relevant code is [`RobloxAuthService.cs`](src/Services/RobloxAuthService.cs).
+</details>
+
+<details>
+<summary><b>What if an update breaks something?</b></summary>
+
+The build being replaced is kept next to the app, so **Settings → Updates → Restore previous version** puts it back and restarts. Your accounts and settings live in the `data\` folder and are never touched by an update. If you would rather not spend the ~56 MB, turn **Keep the previous version** off in the same place.
 </details>
 
 <details>

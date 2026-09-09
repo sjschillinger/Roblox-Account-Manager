@@ -83,6 +83,15 @@ public class SettingsViewModel : ObservableObject
         TrimRamCommand = new RelayCommand(_ => TrimRam());
         CheckForUpdatesCommand = new AsyncRelayCommand(() => _main.CheckForUpdateNowAsync());
         ShowWhatsNewCommand = new AsyncRelayCommand(() => _main.ShowWhatsNewAsync());
+        RollbackCommand = new RelayCommand(_ => Rollback(), _ => UpdateService.HasBackup);
+        DiscardBackupCommand = new RelayCommand(_ => DiscardBackup(), _ => UpdateService.HasBackup);
+        ClearSkippedVersionCommand = new RelayCommand(_ =>
+        {
+            S.SkippedUpdateVersion = "";
+            Persist();
+            _main.SetStatus("Skipped version cleared — the next check will offer it again.");
+        }, _ => !string.IsNullOrEmpty(S.SkippedUpdateVersion));
+        ClearPlaytimeCommand = new RelayCommand(_ => ClearPlaytime());
 
         // The check runs on the main view-model; mirror its progress onto this page.
         _main.PropertyChanged += (_, e) =>
@@ -286,8 +295,8 @@ public class SettingsViewModel : ObservableObject
     public string AppVersion => AppInfo.Long;
 
     // ---- Updates ----
-    // The background poll runs every 5 minutes, but it is silent when there is nothing new, so
-    // there was no way to tell "up to date" apart from "the check is broken". These surface it.
+    // The background poll is silent when there is nothing new, so there was no way to tell
+    // "up to date" apart from "the check is broken". These surface it.
 
     /// <summary>Result of the last check, owned by <see cref="MainViewModel"/> (one poller, one truth).</summary>
     public string UpdateCheckStatus => _main.UpdateCheckStatus;
@@ -295,6 +304,123 @@ public class SettingsViewModel : ObservableObject
 
     public AsyncRelayCommand CheckForUpdatesCommand { get; private set; } = null!;
     public AsyncRelayCommand ShowWhatsNewCommand { get; private set; } = null!;
+
+    public bool AutoCheckUpdates
+    {
+        get => S.AutoCheckUpdates;
+        set { S.AutoCheckUpdates = value; Persist(); _main.ApplyUpdateSchedule(); }
+    }
+
+    public bool CheckUpdatesOnStartup { get => S.CheckUpdatesOnStartup; set { S.CheckUpdatesOnStartup = value; Persist(); } }
+
+    /// <summary>Minutes between background checks. Floored at 15 — see MainViewModel.ApplyUpdateSchedule.</summary>
+    public int UpdateCheckMinutes
+    {
+        get => S.UpdateCheckMinutes;
+        set { S.UpdateCheckMinutes = System.Math.Clamp(value, 15, 1440); Persist(); _main.ApplyUpdateSchedule(); }
+    }
+
+    public bool IncludePrereleases { get => S.IncludePrereleases; set { S.IncludePrereleases = value; Persist(); } }
+    public bool VerifyUpdateDownload { get => S.VerifyUpdateDownload; set { S.VerifyUpdateDownload = value; Persist(); } }
+    public bool KeepUpdateBackup { get => S.KeepUpdateBackup; set { S.KeepUpdateBackup = value; Persist(); } }
+
+    /// <summary>Whether a version is currently being ignored, in words.</summary>
+    public string SkippedVersionText => string.IsNullOrEmpty(S.SkippedUpdateVersion)
+        ? "No version is being skipped."
+        : $"{S.SkippedUpdateVersion} is skipped — you won't be offered it again.";
+
+    public bool HasSkippedVersion => !string.IsNullOrEmpty(S.SkippedUpdateVersion);
+
+    public RelayCommand ClearSkippedVersionCommand { get; private set; } = null!;
+
+    // ---- rollback ----
+
+    /// <summary>True when the last update left a restorable copy of the previous build on disk.</summary>
+    public bool HasUpdateBackup => UpdateService.HasBackup;
+
+    public string BackupStatus => UpdateService.HasBackup
+        ? $"{UpdateService.BackupVersionText ?? "The previous version"} is kept next to the app and can be restored."
+        : "No previous version is stored — there is nothing to roll back to yet.";
+
+    public RelayCommand RollbackCommand { get; private set; } = null!;
+    public RelayCommand DiscardBackupCommand { get; private set; } = null!;
+
+    private void Rollback()
+    {
+        if (!UpdateService.HasBackup) { _main.SetStatus("There is no previous version to restore."); return; }
+
+        string target = UpdateService.BackupVersionText ?? "the previous version";
+        if (!DialogService.Confirm("Roll back to " + target + "?",
+                $"The app will close and restart as {target}. Your accounts and settings are not touched."))
+            return;
+
+        if (UpdateService.BeginRollback()) System.Windows.Application.Current?.Shutdown();
+        else _main.SetStatus("Roll-back could not be started.");
+    }
+
+    private void DiscardBackup()
+    {
+        _main.SetStatus(UpdateService.DiscardBackup()
+            ? "The stored previous version was deleted."
+            : "The stored previous version could not be deleted.");
+        OnPropertyChanged(nameof(HasUpdateBackup));
+        OnPropertyChanged(nameof(BackupStatus));
+    }
+
+    // ---- start with Windows ----
+
+    public bool StartWithWindows
+    {
+        get => S.StartWithWindows;
+        set
+        {
+            // The registry write can be refused on a locked-down machine. Reflect what actually
+            // happened rather than leaving a toggle that looks on and does nothing.
+            bool ok = StartupService.Set(value);
+            S.StartWithWindows = ok && value;
+            Persist();
+            if (!ok) _main.SetStatus("Windows refused the autostart entry — check your account's permissions.");
+            else _main.SetStatus(value ? "The app will start with Windows." : "Autostart disabled.");
+        }
+    }
+
+    public bool StartMinimized { get => S.StartMinimized; set { S.StartMinimized = value; Persist(); } }
+
+    // ---- playtime ----
+
+    public bool TrackPlaytime { get => S.TrackPlaytime; set { S.TrackPlaytime = value; Persist(); } }
+
+    public string PlaytimeStatus
+    {
+        get
+        {
+            var total = PlaytimeService.AllTimeTotal;
+            if (total <= System.TimeSpan.Zero) return "Nothing recorded yet — totals appear once a client has run.";
+            return $"{PlaytimeService.Format(total)} recorded in total, {PlaytimeService.Format(PlaytimeService.Last7DaysTotal)} in the last 7 days.";
+        }
+    }
+
+    public RelayCommand ClearPlaytimeCommand { get; private set; } = null!;
+
+    /// <summary>
+    /// Re-reads the totals line. Driven from <see cref="MainViewModel.RefreshPlaytime"/> rather
+    /// than from the service event directly: sessions are recorded off the UI thread, and the
+    /// main view-model already owns marshalling that back.
+    /// </summary>
+    public void RefreshPlaytimeStatus() => OnPropertyChanged(nameof(PlaytimeStatus));
+
+    private void ClearPlaytime()
+    {
+        if (!DialogService.Confirm("Delete playtime history?",
+                "Every recorded session is removed. This cannot be undone."))
+            return;
+
+        _main.SetStatus(PlaytimeService.Clear()
+            ? "Playtime history cleared."
+            : "Playtime history cleared, but the file could not be deleted.");
+        _main.RefreshPlaytime();
+        OnPropertyChanged(nameof(PlaytimeStatus));
+    }
 
     /// <summary>Where the installed client actually lives — useful when a launch misbehaves.</summary>
     public string InstallStatus

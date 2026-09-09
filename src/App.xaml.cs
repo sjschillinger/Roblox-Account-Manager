@@ -14,7 +14,10 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         // ---- self-update entry points (parsed BEFORE any normal startup work) ----
-        // Contract: --apply-update "<mainExePath>" <mainPid> "<downloadUrl>" "<versionText>"
+        // Contract: --apply-update "<mainExe>" <mainPid> "<url>" "<version>"
+        //                          [<size> "<sha256|->" <verify> <keepBackup>]
+        // The trailing verification arguments arrived in v1.7.0 and stay optional, so an older
+        // build handing over to a newer updater (or the reverse) still produces a working update.
         // Runs as the %TEMP% updater copy: show only the updater window, skip everything else
         // (including the single-instance mutex — the main app is still shutting down).
         if (e.Args.Length >= 5 && e.Args[0] == "--apply-update")
@@ -22,7 +25,9 @@ public partial class App : Application
             DispatcherUnhandledException += OnUnhandledException;
             base.OnStartup(e);
 
-            var updater = new UpdaterWindow(e.Args[1], e.Args[2], e.Args[3], e.Args[4]);
+            string? Arg(int i) => e.Args.Length > i ? e.Args[i] : null;
+            var updater = new UpdaterWindow(e.Args[1], e.Args[2], e.Args[3], e.Args[4],
+                                            Arg(5), Arg(6), Arg(7), Arg(8));
             MainWindow = updater;
             updater.Show();
             return;
@@ -85,6 +90,13 @@ public partial class App : Application
         var window = new MainWindow(vm);
         MainWindow = window;
         window.Show();
+
+        // Autostart with "start minimized": Show() first regardless — the tray icon is created in
+        // OnSourceInitialized, which only runs once the window has a handle. Hiding straight after
+        // gives a tray-only start without a window ever flashing up.
+        if (SettingsService.Current.StartMinimized
+            && e.Args.Contains(StartupService.StartupArg, StringComparer.OrdinalIgnoreCase))
+            window.HideToTray();
 
         WireBackgroundServices(vm);
 
@@ -270,6 +282,9 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         SingleInstanceService.StopServer();
+        // Book every client still running: once this process is gone nothing observes them, and
+        // for a manager left open all day that is most of the playtime there is to record.
+        PlaytimeService.FlushOpenSessions();
         AntiAfkService.Stop();
         WatchdogService.Stop();
         SchedulerService.Stop();

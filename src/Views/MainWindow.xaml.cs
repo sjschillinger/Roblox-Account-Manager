@@ -94,6 +94,16 @@ public partial class MainWindow : Window
         catch { _tray = null; }
     }
 
+    /// <summary>
+    /// Drops the window to the tray. Used by an autostart launch with "start minimized": the
+    /// window is shown first (that is what creates the tray icon), then hidden immediately.
+    /// </summary>
+    public void HideToTray()
+    {
+        Hide();
+        if (_tray != null) _tray.Visible = true;
+    }
+
     private void ShowFromTray()
     {
         Show();

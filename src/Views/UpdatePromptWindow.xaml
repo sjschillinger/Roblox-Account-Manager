@@ -69,6 +69,9 @@
                 <Button Style="{StaticResource GhostButton}" Content="View on GitHub ↗"
                         HorizontalAlignment="Left" Click="ViewOnGitHub_Click" />
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Style="{StaticResource GhostButton}" Content="Skip this version"
+                            Margin="0,0,10,0" Click="Skip_Click"
+                            ToolTip="Never offer this release again. You'll still be told about the next one." />
                     <Button Style="{StaticResource GhostButton}" Content="Later"
                             Margin="0,0,10,0" Click="Later_Click" />
                     <Button Style="{StaticResource PrimaryButton}" Content="Update now"

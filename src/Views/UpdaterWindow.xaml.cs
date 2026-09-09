@@ -1,24 +1,32 @@
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using RobloxAccountManager.Services;
 
 namespace RobloxAccountManager.Views;
 
 /// <summary>
 /// Portable self-updater, stage 2. This process is a copy of the app running from
 /// %TEMP%\RobloxAccountManagerUpdate\Updater.exe (started with --apply-update): it waits for the
-/// main app to exit, downloads the new exe, swaps it in place, then relaunches the app with
-/// --post-update so the temp folder gets cleaned up.
+/// main app to exit, downloads the new exe, verifies it, swaps it in place — keeping the old
+/// build as a backup — then relaunches the app with --post-update so the temp folder is cleaned up.
 /// </summary>
 public partial class UpdaterWindow : Window
 {
     private const int MaxReplaceAttempts = 20;
+    private const int MaxDownloadAttempts = 3;
     private static readonly TimeSpan ReplaceRetryDelay = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan MainExitTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>How often the progress line is repainted; the read loop ticks far faster than the eye.</summary>
+    private static readonly TimeSpan ProgressRefresh = TimeSpan.FromMilliseconds(120);
 
     private readonly string _mainExePath;
     private readonly int _mainPid;
@@ -26,10 +34,24 @@ public partial class UpdaterWindow : Window
     private readonly string _versionText;
     private readonly string _tempDir;
 
+    /// <summary>Size GitHub reported for the asset; 0 when unknown (then it is not checked).</summary>
+    private readonly long _expectedSize;
+
+    /// <summary>SHA-256 published in the release body; null when the release didn't carry one.</summary>
+    private readonly string? _expectedSha256;
+
+    private readonly bool _verify;
+    private readonly bool _keepBackup;
+
     private CancellationTokenSource? _downloadCts;
     private bool _running;
 
-    public UpdaterWindow(string mainExePath, string mainPid, string downloadUrl, string versionText)
+    /// <summary>Set once the old exe has been moved aside, so a failure can put it back.</summary>
+    private string? _backupPath;
+
+    public UpdaterWindow(string mainExePath, string mainPid, string downloadUrl, string versionText,
+                         string? expectedSize = null, string? sha256 = null,
+                         string? verify = null, string? keepBackup = null)
     {
         InitializeComponent();
 
@@ -37,6 +59,13 @@ public partial class UpdaterWindow : Window
         _mainPid = int.TryParse(mainPid, out int pid) ? pid : 0;
         _downloadUrl = downloadUrl;
         _versionText = versionText;
+
+        // Every verification argument is optional: an older build handing over to this one (or the
+        // reverse, mid-rollout) must still produce a working update rather than a crash on startup.
+        _expectedSize = long.TryParse(expectedSize, out long size) && size > 0 ? size : 0;
+        _expectedSha256 = string.IsNullOrWhiteSpace(sha256) || sha256 == "-" ? null : sha256.ToLowerInvariant();
+        _verify = verify != "0";
+        _keepBackup = keepBackup != "0";
 
         // We live in the update temp dir; download next to ourselves so --post-update removes both.
         string? procDir = Path.GetDirectoryName(Environment.ProcessPath);
@@ -82,18 +111,23 @@ public partial class UpdaterWindow : Window
             SetStatus("Waiting for Roblox Account Manager to close…");
             await WaitForMainExitAsync();
 
-            // 2) Download the new exe next to this updater.
+            // 2) Fetch the new exe next to this updater, resuming a partial file if one is there.
             SetStatus($"Downloading {_versionText}…");
             string downloadPath = Path.Combine(_tempDir, "update.exe");
             _downloadCts = new CancellationTokenSource();
-            await DownloadAsync(downloadPath, _downloadCts.Token);
+            await FetchAsync(downloadPath, _downloadCts.Token);
 
-            // 3) Swap the exe in place — point of no return, so cancel is disabled here.
+            // 3) Make sure what arrived is actually the application before it replaces one.
+            SetStatus("Verifying the download…");
+            SetDetail("");
+            await VerifyAsync(downloadPath, _downloadCts.Token);
+
+            // 4) Swap the exe in place — point of no return, so cancel is disabled here.
             CancelButton.IsEnabled = false;
             SetStatus($"Installing {_versionText}…");
             await ReplaceMainExeAsync(downloadPath);
 
-            // 4) Relaunch the updated app; it cleans this temp folder up in the background.
+            // 5) Relaunch the updated app; it cleans this temp folder up in the background.
             SetStatus("Starting the updated app…");
             var psi = new ProcessStartInfo(_mainExePath) { UseShellExecute = false };
             psi.ArgumentList.Add("--post-update");
@@ -103,13 +137,16 @@ public partial class UpdaterWindow : Window
         }
         catch (OperationCanceledException)
         {
-            // User cancelled the download: put the old app back on screen.
+            // User cancelled the download: put the old app back on screen. The partial file stays
+            // on disk on purpose — a retry resumes from where this one stopped.
             StartOldAppAndExit();
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[Updater] Update failed: {ex}");
+            RestoreBackupIfNeeded();
             SetStatus($"Update failed: {Shorten(ex.Message)}");
+            SetDetail("Your current version is untouched — you can retry or keep using it.");
             Progress.Value = 0;
             PercentText.Text = "";
             CancelButton.Visibility = Visibility.Collapsed;
@@ -138,59 +175,240 @@ public partial class UpdaterWindow : Window
         catch (InvalidOperationException) { } // exited between lookup and wait
     }
 
+    // ---- download ----
+
+    /// <summary>
+    /// Puts the new build at <paramref name="destination"/>. A rollback hands us a local file
+    /// instead of a URL, in which case there is nothing to download.
+    /// </summary>
+    private async Task FetchAsync(string destination, CancellationToken ct)
+    {
+        if (Uri.TryCreate(_downloadUrl, UriKind.Absolute, out var uri) && uri.IsFile)
+        {
+            SetStatus($"Restoring {_versionText}…");
+            File.Copy(uri.LocalPath, destination, overwrite: true);
+            Progress.Value = 100;
+            PercentText.Text = "100%";
+            return;
+        }
+
+        Exception? last = null;
+        for (int attempt = 1; attempt <= MaxDownloadAttempts; attempt++)
+        {
+            try
+            {
+                await DownloadAsync(destination, ct);
+                return;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) when (ex is HttpRequestException or IOException)
+            {
+                // A dropped connection on a 58 MB download used to mean starting over. The bytes
+                // already on disk are still good, so keep them and let the next attempt resume.
+                last = ex;
+                if (attempt == MaxDownloadAttempts) break;
+                SetStatus($"Connection lost — retrying ({attempt + 1}/{MaxDownloadAttempts})…");
+                await Task.Delay(TimeSpan.FromSeconds(2 * attempt), ct);
+            }
+        }
+        throw new IOException($"The download failed after {MaxDownloadAttempts} attempts.", last);
+    }
+
     private async Task DownloadAsync(string destination, CancellationToken ct)
     {
         // No overall HttpClient timeout: large file on a slow line; cancel comes from the token.
         using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("RobloxAccountManager");
 
-        using var resp = await http.GetAsync(_downloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+        // Resume point: whatever a previous attempt already wrote. Guard against a stale file
+        // that is somehow larger than the asset — that can only be leftover junk.
+        long resumeFrom = 0;
+        var existing = new FileInfo(destination);
+        if (existing.Exists && existing.Length > 0
+            && (_expectedSize == 0 || existing.Length < _expectedSize))
+            resumeFrom = existing.Length;
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, _downloadUrl);
+        if (resumeFrom > 0) req.Headers.Range = new RangeHeaderValue(resumeFrom, null);
+
+        using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+
+        // The server may ignore the Range header (or the file changed underneath us) and answer
+        // 200 with the whole body. Starting from zero is then the only correct thing to do.
+        bool resuming = resp.StatusCode == HttpStatusCode.PartialContent;
+        if (resumeFrom > 0 && !resuming)
+        {
+            if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
+            {
+                // Already have every byte the server has — nothing left to fetch.
+                if (_expectedSize > 0 && existing.Length >= _expectedSize) { ReportProgress(existing.Length, _expectedSize, null); return; }
+                File.Delete(destination);   // otherwise the file is junk; start clean
+            }
+            resumeFrom = 0;
+        }
         resp.EnsureSuccessStatusCode();
 
-        long total = resp.Content.Headers.ContentLength ?? -1;
+        long total = resumeFrom + (resp.Content.Headers.ContentLength ?? -1);
+        if (resp.Content.Headers.ContentLength == null) total = _expectedSize;
+
         await using var source = await resp.Content.ReadAsStreamAsync(ct);
-        await using var file = new FileStream(destination, FileMode.Create, FileAccess.Write,
+        await using var file = new FileStream(destination,
+            resuming ? FileMode.Append : FileMode.Create, FileAccess.Write,
             FileShare.None, 81920, useAsync: true);
 
         var buffer = new byte[81920];
-        long done = 0;
+        long done = resumeFrom;
+        var clock = Stopwatch.StartNew();
+        long clockBase = resumeFrom;
+        var lastPaint = TimeSpan.Zero;
         int read;
+
         while ((read = await source.ReadAsync(buffer, ct)) > 0)
         {
             await file.WriteAsync(buffer.AsMemory(0, read), ct);
             done += read;
-            if (total > 0)
-            {
-                int pct = (int)(done * 100 / total);
-                Progress.Value = pct;
-                PercentText.Text = $"{pct}%";
-            }
-            else
-            {
-                PercentText.Text = $"{done / (1024.0 * 1024.0):0.0} MB";
-            }
+
+            if (clock.Elapsed - lastPaint < ProgressRefresh) continue;
+            lastPaint = clock.Elapsed;
+            double bytesPerSecond = clock.Elapsed.TotalSeconds > 0.5
+                ? (done - clockBase) / clock.Elapsed.TotalSeconds
+                : 0;
+            ReportProgress(done, total, bytesPerSecond);
         }
 
+        ReportProgress(done, total, null);
         if (done == 0) throw new IOException("The downloaded file is empty.");
     }
 
+    private void ReportProgress(long done, long total, double? bytesPerSecond)
+    {
+        if (total > 0)
+        {
+            int pct = (int)Math.Min(100, done * 100 / total);
+            Progress.Value = pct;
+            PercentText.Text = $"{pct}%";
+            SetDetail($"{Mb(done)} of {Mb(total)}{Rate(bytesPerSecond)}{Eta(total - done, bytesPerSecond)}");
+        }
+        else
+        {
+            PercentText.Text = Mb(done);
+            SetDetail(Rate(bytesPerSecond).TrimStart(' ', '·', ' '));
+        }
+    }
+
+    private static string Mb(long bytes) => $"{bytes / (1024.0 * 1024.0):0.0} MB";
+
+    private static string Rate(double? bytesPerSecond)
+        => bytesPerSecond is > 0 ? $" · {bytesPerSecond.Value / (1024.0 * 1024.0):0.0} MB/s" : "";
+
+    private static string Eta(long remaining, double? bytesPerSecond)
+    {
+        if (bytesPerSecond is not > 0 || remaining <= 0) return "";
+        var left = TimeSpan.FromSeconds(remaining / bytesPerSecond.Value);
+        return left.TotalMinutes >= 1
+            ? $" · {left.Minutes}m {left.Seconds}s left"
+            : $" · {Math.Max(1, left.Seconds)}s left";
+    }
+
+    // ---- verification ----
+
+    /// <summary>
+    /// Refuses to install anything that is not plainly the new application. Without this the file
+    /// GitHub happened to return was copied straight over the exe — and an error page, a captive
+    /// portal's login HTML or a download truncated by a dropped connection all "succeed" as far as
+    /// the transfer is concerned, leaving an unstartable app behind and no way back.
+    /// </summary>
+    private async Task VerifyAsync(string path, CancellationToken ct)
+    {
+        var file = new FileInfo(path);
+        if (!file.Exists || file.Length == 0) throw new IOException("The downloaded file is empty.");
+
+        // A Windows executable begins with "MZ". HTML, JSON and plain text never do.
+        await using (var head = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            var magic = new byte[2];
+            if (await head.ReadAsync(magic.AsMemory(0, 2), ct) != 2 || magic[0] != 0x4D || magic[1] != 0x5A)
+                throw new IOException("The download is not a Windows application — GitHub may have returned an error page.");
+        }
+
+        if (!_verify) return;
+
+        if (_expectedSize > 0 && file.Length != _expectedSize)
+            throw new IOException(
+                $"The download is incomplete ({Mb(file.Length)} of {Mb(_expectedSize)}).");
+
+        if (_expectedSha256 == null) return;
+
+        string actual = await Task.Run(() =>
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024);
+            return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        }, ct);
+
+        if (actual != _expectedSha256)
+            throw new IOException("The download's checksum does not match the one published for this release.");
+    }
+
+    // ---- install ----
+
+    /// <summary>
+    /// Moves the running build aside, then puts the new one in its place. The old exe used to be
+    /// overwritten outright, which left nothing to fall back on: a swap that failed halfway, or a
+    /// new build that turned out broken, meant reinstalling by hand. Now it is renamed first, so
+    /// a failure here is undone automatically and the user can roll back later from Settings.
+    /// </summary>
     private async Task ReplaceMainExeAsync(string downloadPath)
     {
+        string backup = _mainExePath + UpdateService.BackupSuffix;
+
+        // Only one backup is kept — the build being replaced right now.
+        try { if (File.Exists(backup)) File.Delete(backup); } catch { }
+
         Exception? last = null;
         for (int attempt = 1; attempt <= MaxReplaceAttempts; attempt++)
         {
             try
             {
+                if (File.Exists(_mainExePath))
+                {
+                    File.Move(_mainExePath, backup, overwrite: true);
+                    _backupPath = backup;
+                }
+
                 File.Copy(downloadPath, _mainExePath, overwrite: true);
+
+                // The swap held. Keep or drop the backup as the user asked.
+                if (!_keepBackup)
+                {
+                    try { File.Delete(backup); } catch { }
+                    _backupPath = null;
+                }
+                else _backupPath = null;   // no longer a pending rollback — it is a kept backup
+
                 return;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                last = ex; // old exe still locked (straggling process, antivirus scan) — wait and retry
+                // Old exe still locked (straggling process, antivirus scan) — undo and retry.
+                last = ex;
+                RestoreBackupIfNeeded();
                 await Task.Delay(ReplaceRetryDelay);
             }
         }
         throw new IOException($"Could not replace the application executable after {MaxReplaceAttempts} attempts.", last);
+    }
+
+    /// <summary>Puts the old exe back when the swap did not complete. Safe to call repeatedly.</summary>
+    private void RestoreBackupIfNeeded()
+    {
+        if (_backupPath == null) return;
+        try
+        {
+            if (File.Exists(_backupPath) && !File.Exists(_mainExePath))
+                File.Move(_backupPath, _mainExePath);
+        }
+        catch (Exception ex) { Debug.WriteLine($"[Updater] Restore failed: {ex.Message}"); }
+        finally { _backupPath = null; }
     }
 
     // ---- buttons ----
@@ -207,6 +425,7 @@ public partial class UpdaterWindow : Window
 
     private void StartOldAppAndExit()
     {
+        RestoreBackupIfNeeded();
         try { Process.Start(new ProcessStartInfo(_mainExePath) { UseShellExecute = false }); }
         catch { }
         Application.Current.Shutdown();
@@ -214,6 +433,8 @@ public partial class UpdaterWindow : Window
 
     // ---- helpers ----
     private void SetStatus(string text) => StatusText.Text = text;
+
+    private void SetDetail(string text) => DetailText.Text = text;
 
     private static string Shorten(string s) => s.Length <= 120 ? s : s[..117] + "…";
 

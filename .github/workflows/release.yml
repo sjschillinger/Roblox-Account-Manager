@@ -1,0 +1,130 @@
+name: Release
+
+# Cutting a release is: add the CHANGELOG section, bump <Version>, push the tag.
+# Everything below — building the single-file exe, writing the release notes from the changelog,
+# publishing the checksum the in-app updater verifies against — happens here.
+#
+# The checksum matters: the updater refuses to install a download whose SHA-256 does not match the
+# one in the release body, so the digest MUST come from the same job that produced the binary.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and release (e.g. v1.7.0)'
+        required: true
+
+permissions:
+  contents: write        # needed to create the release and upload its assets
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = if ($env:INPUT_TAG) { $env:INPUT_TAG } else { $env:GITHUB_REF -replace '^refs/tags/', '' }
+          $number = $tag -replace '^v', ''
+
+          # The tag and <Version> must agree: the app slices its changelog by the version baked
+          # into the assembly, so a mismatch ships a build whose "What's new" is somebody else's.
+          $csproj = Get-Content 'src/RobloxAccountManager.csproj' -Raw -Encoding utf8
+          if ($csproj -notmatch '<Version>([^<]+)</Version>') { throw 'No <Version> in the csproj.' }
+          $project = $Matches[1].Trim()
+          if ($project -ne $number) {
+            throw "Tag $tag does not match <Version>$project</Version>. Bump the csproj before tagging."
+          }
+
+          "tag=$tag"       | Out-File $env:GITHUB_OUTPUT -Append
+          "number=$number" | Out-File $env:GITHUB_OUTPUT -Append
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+
+      - name: Build (0 warnings required)
+        shell: pwsh
+        run: dotnet build src/RobloxAccountManager.csproj -c Release --nologo -warnaserror
+
+      - name: Publish the single-file exe
+        shell: pwsh
+        run: |
+          dotnet publish src/RobloxAccountManager.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=none -p:SatelliteResourceLanguages=en `
+            -o publish
+
+          # Ship it under the name the README and every previous release use.
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item 'publish/Roblox Account Manager.exe' 'dist/RobloxAccountManager.exe' -Force
+
+      - name: Checksum
+        id: checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash 'dist/RobloxAccountManager.exe' -Algorithm SHA256).Hash.ToLower()
+          "$hash  RobloxAccountManager.exe" | Out-File 'dist/SHA256SUMS.txt' -Encoding ascii
+          "sha256=$hash" | Out-File $env:GITHUB_OUTPUT -Append
+          $size = [math]::Round((Get-Item 'dist/RobloxAccountManager.exe').Length / 1MB, 1)
+          "size=$size" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - name: Build the release notes from CHANGELOG.md
+        id: notes
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.number }}'
+          $lines = Get-Content 'CHANGELOG.md' -Encoding utf8
+
+          # Everything from "## vX.Y.Z" up to the next "## " heading — the same slice the app
+          # makes at runtime, so the release page and "What's new" cannot drift apart.
+          $start = -1
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match "^##\s+v?$([regex]::Escape($version))\b") { $start = $i; break }
+          }
+          if ($start -lt 0) { throw "CHANGELOG.md has no section for v$version." }
+
+          $end = $lines.Count
+          for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^##\s') { $end = $i; break }
+          }
+
+          $body = ($lines[$start..($end - 1)] -join "`n").TrimEnd()
+          $body = $body -replace '(?s)\s*---\s*$', ''
+
+          $body += "`n`n---`n`n"
+          $body += "**Download:** ``RobloxAccountManager.exe`` (${{ steps.checksum.outputs.size }} MB) — one portable file, nothing to install.`n`n"
+          $body += "``RobloxAccountManager.exe`` SHA-256: ``${{ steps.checksum.outputs.sha256 }}```n`n"
+          $body += "The in-app updater verifies this checksum before it replaces anything, and keeps your previous version so you can roll back from **Settings -> Updates**."
+
+          Set-Content -Path 'release-notes.md' -Value $body -Encoding utf8
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: release-notes.md
+          draft: false
+          # A tag with a suffix (v1.8.0-beta.1) is a pre-release; the app only offers those to
+          # users who opted into the pre-release channel.
+          prerelease: ${{ contains(steps.version.outputs.number, '-') }}
+          files: |
+            dist/RobloxAccountManager.exe
+            dist/SHA256SUMS.txt

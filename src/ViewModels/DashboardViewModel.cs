@@ -51,6 +51,25 @@ public class DashboardViewModel : ObservableObject
     private string _lastUpdated = "never";
     public string LastUpdated { get => _lastUpdated; private set => SetField(ref _lastUpdated, value); }
 
+    // ---- playtime (#1.7.0) ----
+
+    /// <summary>Combined playtime over the last seven days, e.g. "12h 40m".</summary>
+    public string PlaytimeWeekText => PlaytimeService.Format(PlaytimeService.Last7DaysTotal);
+
+    /// <summary>Combined playtime across the whole recorded history.</summary>
+    public string PlaytimeTotalText => PlaytimeService.Format(PlaytimeService.AllTimeTotal);
+
+    /// <summary>True once anything has been recorded — the tiles read "—" before that.</summary>
+    public bool HasPlaytime => PlaytimeService.AllTimeTotal > TimeSpan.Zero;
+
+    /// <summary>Re-reads the totals after a session was recorded.</summary>
+    public void RefreshPlaytime()
+    {
+        OnPropertyChanged(nameof(PlaytimeWeekText));
+        OnPropertyChanged(nameof(PlaytimeTotalText));
+        OnPropertyChanged(nameof(HasPlaytime));
+    }
+
     public AsyncRelayCommand RefreshCommand { get; }
 
     private void OnAccountsChanged(object? sender, NotifyCollectionChangedEventArgs e) => OnPresenceUpdated();

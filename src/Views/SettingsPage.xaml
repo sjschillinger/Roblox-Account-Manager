@@ -160,6 +160,22 @@
                         <TextBox Width="90" HorizontalAlignment="Right" VerticalAlignment="Center"
                                  Text="{Binding PresencePollSeconds, UpdateSourceTrigger=LostFocus}" />
                     </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Track playtime" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Records how long each account's client runs, so the Dashboard and the account list can show totals. Stored locally in data/playtime.json; six months are kept."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding TrackPlaytime}" />
+                    </Grid>
+                    <Grid Margin="16,0,16,14">
+                        <TextBlock Text="{Binding PlaytimeStatus}" Style="{StaticResource Caption}"
+                                   TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,150,0" />
+                        <Button Style="{StaticResource GhostButton}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Content="Clear history" Command="{Binding ClearPlaytimeCommand}" />
+                    </Grid>
                 </StackPanel>
             </Border>
 
@@ -506,6 +522,26 @@
                         <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
                                   IsChecked="{Binding MinimizeToTray}" />
                     </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Start with Windows" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Adds an entry under your own account — no administrator rights needed. It follows the app if you move the exe."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding StartWithWindows}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Start minimized" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Open straight into the system tray instead of showing the window. Applies to an autostart launch."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding StartMinimized}" />
+                    </Grid>
                 </StackPanel>
             </Border>
 
@@ -833,6 +869,93 @@
                 </StackPanel>
             </Border>
 
+            <!-- ===== Updates ===== -->
+            <TextBlock Text="Updates" Style="{StaticResource DisplayText}" FontSize="15" Margin="2,0,0,10" />
+            <Border Style="{StaticResource Card}" Padding="4" Margin="0,0,0,20">
+                <StackPanel>
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Check automatically" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Look for a new release in the background and show a pill in the title bar. Installing is always your choice."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding AutoCheckUpdates}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Check interval" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Minutes between background checks (15–1440). GitHub allows 60 anonymous requests an hour, so a tighter interval buys nothing."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <TextBox Width="90" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                 Text="{Binding UpdateCheckMinutes, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Check at startup" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Run one check when the app opens." Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding CheckUpdatesOnStartup}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Include pre-releases" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Also offer releases marked as pre-release. These are test builds — expect rough edges."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding IncludePrereleases}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Verify downloads" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Check the size and — when the release publishes one — the SHA-256 checksum before anything replaces the app. Leave this on."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding VerifyUpdateDownload}" />
+                    </Grid>
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+                    <Grid Margin="16,14">
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,120,0">
+                            <TextBlock Text="Keep the previous version" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Stores the replaced build next to the app so you can roll back if an update goes wrong. Costs about 56 MB of disk."
+                                       Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding KeepUpdateBackup}" />
+                    </Grid>
+
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+
+                    <StackPanel Margin="16,14">
+                        <TextBlock Text="{Binding SkippedVersionText}" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                        <Button Style="{StaticResource GhostButton}" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                Content="Stop skipping that version" Command="{Binding ClearSkippedVersionCommand}"
+                                Visibility="{Binding HasSkippedVersion, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="16,0" />
+
+                    <StackPanel Margin="16,14">
+                        <TextBlock Text="Roll back" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="{Binding BackupStatus}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        <WrapPanel Margin="0,10,0,0">
+                            <Button Style="{StaticResource GhostButton}" Content="Restore previous version"
+                                    Command="{Binding RollbackCommand}" />
+                            <Button Style="{StaticResource GhostButton}" Content="Delete stored copy" Margin="10,0,0,0"
+                                    Command="{Binding DiscardBackupCommand}" />
+                        </WrapPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <!-- ===== About / updates ===== -->
             <TextBlock Text="About" Style="{StaticResource DisplayText}" FontSize="15" Margin="2,0,0,10" />
             <Border Style="{StaticResource Card}" Padding="18">
@@ -853,8 +976,8 @@
 
                     <Border Height="1" Background="{DynamicResource HairlineBrush}" Margin="0,16,0,14" />
 
-                    <TextBlock Text="Updates" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
-                    <TextBlock Text="The app checks GitHub automatically every 5 minutes and shows a pill in the title bar when a new release is out. Updating is always your choice — this button just checks right now."
+                    <TextBlock Text="Update status" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <TextBlock Text="How the last check went. The schedule, the pre-release channel and roll-back live in the Updates section above; this button just checks right now."
                                Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,10" />
                     <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="6" Padding="12,10">
                         <TextBlock Text="{Binding UpdateCheckStatus}" Style="{StaticResource Caption}" TextWrapping="Wrap" />

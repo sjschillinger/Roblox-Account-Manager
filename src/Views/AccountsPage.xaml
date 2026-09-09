@@ -129,6 +129,10 @@
                                                       StrokeThickness="1.5" Width="12" Height="12" Stretch="Uniform" VerticalAlignment="Center" />
                                                 <TextBlock Text="{Binding RobuxDisplay}" FontSize="11" Margin="4,0,0,0"
                                                            Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                <TextBlock Text="{Binding PlaytimeTotalText}" FontSize="11" Margin="8,0,0,0"
+                                                           Foreground="{DynamicResource TextMutedBrush}"
+                                                           ToolTip="{Binding LastPlayedText, StringFormat='Total playtime · last played {0}'}"
+                                                           Visibility="{Binding HasPlaytime, Converter={StaticResource BoolToVis}}" />
                                                 <TextBlock FontSize="11" Margin="8,0,0,0"
                                                            Foreground="{DynamicResource TextMutedBrush}" TextTrimming="CharacterEllipsis"
                                                            Visibility="{Binding Alias, Converter={StaticResource NullToVis}}">
@@ -519,26 +523,34 @@
                                 </StackPanel>
                                 </DockPanel>
 
-                                <UniformGrid Columns="3" Margin="0,16,0,0">
-                                    <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="10" Padding="10,8" Margin="0,0,6,0">
+                                <UniformGrid Columns="2" Margin="0,16,0,0">
+                                    <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="10" Padding="10,8" Margin="0,0,3,3">
                                         <StackPanel>
                                             <TextBlock Text="Presence" Style="{StaticResource Caption}" />
                                             <TextBlock Text="{Binding Selected.Presence}" Margin="0,3,0,0" FontWeight="SemiBold" FontSize="12"
                                                        Foreground="{Binding Selected.PresenceColor, Converter={StaticResource HexToBrush}}" />
                                         </StackPanel>
                                     </Border>
-                                    <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="10" Padding="10,8" Margin="3,0">
+                                    <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="10" Padding="10,8" Margin="3,0,0,3">
                                         <StackPanel>
                                             <TextBlock Text="Robux" Style="{StaticResource Caption}" />
                                             <TextBlock Text="{Binding Selected.RobuxDisplay}" Margin="0,3,0,0" FontWeight="SemiBold" FontSize="12"
                                                        Foreground="{DynamicResource TextPrimaryBrush}" />
                                         </StackPanel>
                                     </Border>
-                                    <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="10" Padding="10,8" Margin="6,0,0,0">
+                                    <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="10" Padding="10,8" Margin="0,3,3,0">
                                         <StackPanel>
                                             <TextBlock Text="User ID" Style="{StaticResource Caption}" />
                                             <TextBlock Text="{Binding Selected.UserId}" Margin="0,3,0,0" FontWeight="SemiBold" FontSize="12"
                                                        Foreground="{DynamicResource TextPrimaryBrush}" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="10" Padding="10,8" Margin="3,3,0,0"
+                                            ToolTip="{Binding Selected.LastPlayedText, StringFormat='Last played {0}'}">
+                                        <StackPanel>
+                                            <TextBlock Text="Playtime · 7 days" Style="{StaticResource Caption}" />
+                                            <TextBlock Text="{Binding Selected.Playtime7dText}" Margin="0,3,0,0" FontWeight="SemiBold" FontSize="12"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}" />
                                         </StackPanel>
                                     </Border>
                                 </UniformGrid>

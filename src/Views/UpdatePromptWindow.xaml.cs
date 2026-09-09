@@ -9,11 +9,15 @@ namespace RobloxAccountManager.Views;
 
 /// <summary>
 /// Rich update prompt: current → new version, publish date, download size, full release
-/// notes and a link to the GitHub release. DialogResult == true means "install now".
+/// notes and a link to the GitHub release. DialogResult == true means "install now";
+/// <see cref="Skipped"/> distinguishes "Later" from "never offer this version again".
 /// </summary>
 public partial class UpdatePromptWindow : Window
 {
     private readonly string _releasePageUrl;
+
+    /// <summary>True when the user pressed "Skip this version" rather than "Later".</summary>
+    public bool Skipped { get; private set; }
 
     public UpdatePromptWindow(UpdateInfo info)
     {
@@ -25,6 +29,8 @@ public partial class UpdatePromptWindow : Window
         var meta = new List<string>();
         if (info.PublishedAt is { } dt) meta.Add($"Published {dt.ToLocalTime():d MMM yyyy}");
         if (info.SizeText.Length > 0) meta.Add($"Download {info.SizeText}");
+        if (info.IsPrerelease) meta.Add("Pre-release");
+        if (!string.IsNullOrEmpty(info.Sha256)) meta.Add("Checksum published");
         meta.Add("github.com/Vaelixx/Roblox-Account-Manager");
         MetaText.Text = string.Join("   ·   ", meta);
 
@@ -59,6 +65,12 @@ public partial class UpdatePromptWindow : Window
     private void UpdateNow_Click(object sender, RoutedEventArgs e) => DialogResult = true;
 
     private void Later_Click(object sender, RoutedEventArgs e) => DialogResult = false;
+
+    private void Skip_Click(object sender, RoutedEventArgs e)
+    {
+        Skipped = true;
+        DialogResult = false;
+    }
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
