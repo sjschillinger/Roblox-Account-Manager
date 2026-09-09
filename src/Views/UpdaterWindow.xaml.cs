@@ -369,46 +369,67 @@ public partial class UpdaterWindow : Window
         {
             try
             {
-                if (File.Exists(_mainExePath))
+                // Move the running build aside exactly once, and leave _backupPath set until the
+                // copy has actually succeeded. Restoring between attempts would mean a retry could
+                // move a half-written file over the backup and destroy the only good copy of the
+                // previous version — the very thing this backup exists to prevent.
+                if (_backupPath == null && File.Exists(_mainExePath))
                 {
                     File.Move(_mainExePath, backup, overwrite: true);
                     _backupPath = backup;
                 }
 
-                File.Copy(downloadPath, _mainExePath, overwrite: true);
+                // File.Copy streams into the destination, so a failure partway through leaves a
+                // truncated executable. Clear any such leftover from an earlier attempt.
+                if (File.Exists(_mainExePath)) File.Delete(_mainExePath);
+
+                File.Copy(downloadPath, _mainExePath);
 
                 // The swap held. Keep or drop the backup as the user asked.
-                if (!_keepBackup)
-                {
-                    try { File.Delete(backup); } catch { }
-                    _backupPath = null;
-                }
-                else _backupPath = null;   // no longer a pending rollback — it is a kept backup
+                if (!_keepBackup) { try { File.Delete(backup); } catch { } }
+                _backupPath = null;   // no longer a pending rollback
 
                 return;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Old exe still locked (straggling process, antivirus scan) — undo and retry.
+                // Old exe still locked (straggling process, antivirus scan) — wait and retry.
                 last = ex;
-                RestoreBackupIfNeeded();
                 await Task.Delay(ReplaceRetryDelay);
             }
         }
+
+        // Out of attempts: put the previous build back so the user is left with a working app.
+        RestoreBackupIfNeeded();
         throw new IOException($"Could not replace the application executable after {MaxReplaceAttempts} attempts.", last);
     }
 
-    /// <summary>Puts the old exe back when the swap did not complete. Safe to call repeatedly.</summary>
+    /// <summary>
+    /// Puts the old exe back when the swap did not complete. Safe to call repeatedly.
+    ///
+    /// A file sitting at the destination at this point is our own half-written copy — File.Copy
+    /// creates the target and streams into it, so an error partway through (a full disk, an
+    /// antivirus scanner grabbing the handle) leaves a truncated executable behind. It has to go
+    /// before the backup can be moved back: leaving it would strand the user on a binary that
+    /// cannot start, and the next retry would then move that truncated file over the backup and
+    /// destroy the only good copy of the previous version.
+    /// </summary>
     private void RestoreBackupIfNeeded()
     {
         if (_backupPath == null) return;
         try
         {
-            if (File.Exists(_backupPath) && !File.Exists(_mainExePath))
-                File.Move(_backupPath, _mainExePath);
+            if (!File.Exists(_backupPath)) { _backupPath = null; return; }
+            if (File.Exists(_mainExePath)) File.Delete(_mainExePath);
+            File.Move(_backupPath, _mainExePath);
+            _backupPath = null;
         }
-        catch (Exception ex) { Debug.WriteLine($"[Updater] Restore failed: {ex.Message}"); }
-        finally { _backupPath = null; }
+        catch (Exception ex)
+        {
+            // Leave _backupPath set: the previous build is still on disk under its backup name,
+            // and saying so beats pretending the restore happened.
+            Debug.WriteLine($"[Updater] Restore failed: {ex.Message}");
+        }
     }
 
     // ---- buttons ----
@@ -426,7 +447,14 @@ public partial class UpdaterWindow : Window
     private void StartOldAppAndExit()
     {
         RestoreBackupIfNeeded();
-        try { Process.Start(new ProcessStartInfo(_mainExePath) { UseShellExecute = false }); }
+
+        // If even the restore failed, the previous build is still on disk under its backup name.
+        // Starting that beats leaving the user with nothing at all.
+        string exe = File.Exists(_mainExePath)
+            ? _mainExePath
+            : _backupPath is { } b && File.Exists(b) ? b : _mainExePath;
+
+        try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false }); }
         catch { }
         Application.Current.Shutdown();
     }
