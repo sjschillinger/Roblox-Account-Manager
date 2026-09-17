@@ -107,12 +107,11 @@
     <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
 
     <!-- ============ Radii ============ -->
-    <CornerRadius x:Key="RadiusXs">4</CornerRadius>
-    <CornerRadius x:Key="RadiusSm">6</CornerRadius>
-    <CornerRadius x:Key="RadiusMd">8</CornerRadius>
-    <CornerRadius x:Key="RadiusLg">12</CornerRadius>
-    <CornerRadius x:Key="RadiusXl">16</CornerRadius>
-    <CornerRadius x:Key="RadiusPill">999</CornerRadius>
+    <CornerRadius x:Key="RadiusXs">3</CornerRadius>
+    <CornerRadius x:Key="RadiusSm">4</CornerRadius>
+    <CornerRadius x:Key="RadiusMd">6</CornerRadius>
+    <CornerRadius x:Key="RadiusLg">8</CornerRadius>
+    <CornerRadius x:Key="RadiusXl">10</CornerRadius>
 
     <!-- Only floating layers cast a shadow: menus, popovers, dialogs, toasts. -->
     <DropShadowEffect x:Key="ShadowFloating" BlurRadius="28" ShadowDepth="8" Direction="270"

@@ -165,7 +165,7 @@
                                             <DataTemplate DataType="{x:Type vm:PresetMember}">
                                                 <CheckBox Width="230" Height="38" Margin="6,2" IsChecked="{Binding IsIncluded}">
                                                     <StackPanel Orientation="Horizontal">
-                                                        <ctl:AvatarView Width="24" Height="24" CornerRadius="7" ImageUrl="{Binding Account.ThumbnailUrl}"
+                                                        <ctl:AvatarView Width="24" Height="24" CornerRadius="5" ImageUrl="{Binding Account.ThumbnailUrl}"
                                                                         NameText="{Binding Account.Username}" />
                                                         <TextBlock Text="{Binding Account.DisplayNameOrUser}" Margin="9,0,0,0" VerticalAlignment="Center"
                                                                    TextTrimming="CharacterEllipsis" MaxWidth="160" />

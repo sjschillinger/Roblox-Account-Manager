@@ -29,7 +29,7 @@
                 </Grid>
             </StackPanel>
 
-            <Border Grid.Row="1" Background="{DynamicResource SurfaceAltBrush}" CornerRadius="0,0,11,11"
+            <Border Grid.Row="1" Background="{DynamicResource SurfaceAltBrush}" CornerRadius="0,0,7,7"
                     BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="24,14">
                 <Button x:Name="CancelBtn" Style="{StaticResource Btn.Secondary}" MinWidth="96" HorizontalAlignment="Right"
                         Content="{DynamicResource Str.Common.Cancel}" Click="Cancel_Click" />

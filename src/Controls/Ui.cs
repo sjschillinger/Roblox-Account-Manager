@@ -27,7 +27,7 @@ public static class Ui
 
     public static readonly DependencyProperty CornerRadiusProperty =
         DependencyProperty.RegisterAttached("CornerRadius", typeof(CornerRadius), typeof(Ui),
-            new PropertyMetadata(new CornerRadius(8)));
+            new PropertyMetadata(new CornerRadius(6)));
 
     public static CornerRadius GetCornerRadius(DependencyObject d) => (CornerRadius)d.GetValue(CornerRadiusProperty);
     public static void SetCornerRadius(DependencyObject d, CornerRadius v) => d.SetValue(CornerRadiusProperty, v);

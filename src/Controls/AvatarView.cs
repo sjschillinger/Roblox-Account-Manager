@@ -55,7 +55,7 @@ public class AvatarView : Control
     public string? Presence { get => (string?)GetValue(PresenceProperty); set => SetValue(PresenceProperty, value); }
 
     public static readonly DependencyProperty CornerRadiusProperty =
-        DependencyProperty.Register(nameof(CornerRadius), typeof(CornerRadius), typeof(AvatarView), new PropertyMetadata(new CornerRadius(10)));
+        DependencyProperty.Register(nameof(CornerRadius), typeof(CornerRadius), typeof(AvatarView), new PropertyMetadata(new CornerRadius(8)));
 
     public CornerRadius CornerRadius { get => (CornerRadius)GetValue(CornerRadiusProperty); set => SetValue(CornerRadiusProperty, value); }
 

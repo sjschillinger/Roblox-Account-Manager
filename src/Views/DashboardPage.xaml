@@ -171,7 +171,7 @@
                                                         <ColumnDefinition Width="80" />
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
-                                                    <ctl:AvatarView Width="30" Height="30" CornerRadius="9" HorizontalAlignment="Left"
+                                                    <ctl:AvatarView Width="30" Height="30" CornerRadius="7" HorizontalAlignment="Left"
                                                                     ImageUrl="{Binding Account.ThumbnailUrl}" NameText="{Binding Name}" />
                                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
                                                         <TextBlock Text="{Binding Name}" FontWeight="Medium" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimaryBrush}" />
@@ -238,7 +238,7 @@
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
-                                                    <ctl:AvatarView Width="28" Height="28" CornerRadius="8" HorizontalAlignment="Left"
+                                                    <ctl:AvatarView Width="28" Height="28" CornerRadius="6" HorizontalAlignment="Left"
                                                                     ImageUrl="{Binding ThumbnailUrl}" NameText="{Binding Username}" />
                                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,8,0">
                                                         <TextBlock FontWeight="Medium" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimaryBrush}">
@@ -319,7 +319,7 @@
                                                                     <ColumnDefinition Width="38" />
                                                                     <ColumnDefinition Width="*" />
                                                                 </Grid.ColumnDefinitions>
-                                                                <ctl:AvatarView Width="28" Height="28" CornerRadius="8" PipSize="9" HorizontalAlignment="Left"
+                                                                <ctl:AvatarView Width="28" Height="28" CornerRadius="6" PipSize="9" HorizontalAlignment="Left"
                                                                                 ImageUrl="{Binding ThumbnailUrl}" NameText="{Binding Username}" Presence="{Binding Presence}" />
                                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                                     <TextBlock FontWeight="Medium" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimaryBrush}">

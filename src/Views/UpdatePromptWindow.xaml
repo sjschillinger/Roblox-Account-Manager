@@ -47,7 +47,7 @@
             </Border>
 
             <!-- Footer -->
-            <Border Grid.Row="2" Background="{DynamicResource SurfaceAltBrush}" CornerRadius="0,0,11,11"
+            <Border Grid.Row="2" Background="{DynamicResource SurfaceAltBrush}" CornerRadius="0,0,7,7"
                     BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16,14,24,14">
                 <Grid>
                     <Button Style="{StaticResource Btn.Ghost}" ctl:Ui.Icon="{StaticResource Icon.External}" HorizontalAlignment="Left"

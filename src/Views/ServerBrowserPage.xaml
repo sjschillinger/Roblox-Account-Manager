@@ -47,8 +47,8 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Border Width="34" Height="34" CornerRadius="8" Background="{DynamicResource SurfaceAltBrush}">
-                    <Border CornerRadius="8">
+                <Border Width="34" Height="34" CornerRadius="7" Background="{DynamicResource SurfaceAltBrush}">
+                    <Border CornerRadius="7">
                         <Border.Background>
                             <ImageBrush Stretch="UniformToFill" ImageSource="{Binding PlaceIcon, Converter={StaticResource UrlToImage}}" />
                         </Border.Background>
@@ -179,7 +179,7 @@
                             <ComboBox.ItemTemplate>
                                 <DataTemplate DataType="{x:Type models:Account}">
                                     <StackPanel Orientation="Horizontal">
-                                        <ctl:AvatarView Width="20" Height="20" CornerRadius="6" ImageUrl="{Binding ThumbnailUrl}" NameText="{Binding Username}" Presence="{Binding Presence}" PipSize="7" RingBrush="{DynamicResource ElevatedBrush}" />
+                                        <ctl:AvatarView Width="20" Height="20" CornerRadius="5" ImageUrl="{Binding ThumbnailUrl}" NameText="{Binding Username}" Presence="{Binding Presence}" PipSize="7" RingBrush="{DynamicResource ElevatedBrush}" />
                                         <TextBlock Margin="9,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
                                             <TextBlock.Text>
                                                 <MultiBinding Converter="{StaticResource MaskConverter}">

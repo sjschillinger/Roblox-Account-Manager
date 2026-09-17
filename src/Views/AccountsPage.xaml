@@ -17,16 +17,16 @@
                     <ColumnDefinition Width="26" />
                     <ColumnDefinition Width="44" />
                     <ColumnDefinition Width="*" MinWidth="120" />
-                    <ColumnDefinition Width="170" />
+                    <ColumnDefinition Width="160" />
                     <ColumnDefinition Width="86" />
-                    <ColumnDefinition Width="78" />
+                    <ColumnDefinition Width="96" />
                     <ColumnDefinition Width="52" />
                 </Grid.ColumnDefinitions>
 
                 <CheckBox x:Name="check" VerticalAlignment="Center" Focusable="False" Opacity="0"
                           IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
-                <ctl:AvatarView Grid.Column="1" Width="34" Height="34" CornerRadius="10" PipSize="10" HorizontalAlignment="Left"
+                <ctl:AvatarView Grid.Column="1" Width="34" Height="34" CornerRadius="8" PipSize="10" HorizontalAlignment="Left"
                                 ImageUrl="{Binding ThumbnailUrl}" NameText="{Binding Username}" Presence="{Binding Presence}"
                                 RingBrush="{DynamicResource SurfaceBrush}" />
 
@@ -60,14 +60,14 @@
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
                     <Ellipse Style="{StaticResource StatusDot}" Fill="{Binding Presence, Converter={StaticResource PresenceToBrush}}" Margin="0,0,8,0" />
                     <TextBlock Text="{Binding StatusLine}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}"
-                               TextTrimming="CharacterEllipsis" MaxWidth="150" ToolTip="{Binding StatusLine}" />
+                               TextTrimming="CharacterEllipsis" MaxWidth="134" ToolTip="{Binding StatusLine}" />
                 </StackPanel>
 
                 <TextBlock Grid.Column="4" Text="{Binding RobuxDisplay}" VerticalAlignment="Center" HorizontalAlignment="Right"
                            FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,12,0" />
 
                 <TextBlock Grid.Column="5" Text="{Binding Playtime7dText}" VerticalAlignment="Center" HorizontalAlignment="Right"
-                           FontSize="12.5" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,12,0"
+                           FontSize="12.5" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,12,0" TextTrimming="CharacterEllipsis"
                            ToolTip="{DynamicResource Str.Accounts.Column.PlaytimeTip}" />
 
                 <StackPanel Grid.Column="6" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,6,0">
@@ -142,14 +142,14 @@
                     <ColumnDefinition Width="26" />
                     <ColumnDefinition Width="44" />
                     <ColumnDefinition Width="*" MinWidth="120" />
-                    <ColumnDefinition Width="170" />
+                    <ColumnDefinition Width="160" />
                     <ColumnDefinition Width="86" />
-                    <ColumnDefinition Width="78" />
+                    <ColumnDefinition Width="96" />
                     <ColumnDefinition Width="52" />
                 </Grid.ColumnDefinitions>
                 <CheckBox x:Name="check" VerticalAlignment="Center" Focusable="False" Opacity="0"
                           IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                <ctl:AvatarView Grid.Column="1" Width="22" Height="22" CornerRadius="6" PipSize="8" HorizontalAlignment="Left"
+                <ctl:AvatarView Grid.Column="1" Width="22" Height="22" CornerRadius="5" PipSize="8" HorizontalAlignment="Left"
                                 ImageUrl="{Binding ThumbnailUrl}" NameText="{Binding Username}" Presence="{Binding Presence}" />
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
                     <Border Width="8" Height="8" CornerRadius="2" Margin="0,0,7,0" VerticalAlignment="Center"
@@ -170,12 +170,12 @@
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
                     <Ellipse Style="{StaticResource StatusDot}" Fill="{Binding Presence, Converter={StaticResource PresenceToBrush}}" Margin="0,0,8,0" />
                     <TextBlock Text="{Binding StatusLine}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}"
-                               TextTrimming="CharacterEllipsis" MaxWidth="150" />
+                               TextTrimming="CharacterEllipsis" MaxWidth="134" />
                 </StackPanel>
                 <TextBlock Grid.Column="4" Text="{Binding RobuxDisplay}" VerticalAlignment="Center" HorizontalAlignment="Right"
                            FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,12,0" />
                 <TextBlock Grid.Column="5" Text="{Binding Playtime7dText}" VerticalAlignment="Center" HorizontalAlignment="Right"
-                           FontSize="12.5" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,12,0" />
+                           FontSize="12.5" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,12,0" TextTrimming="CharacterEllipsis" />
                 <StackPanel Grid.Column="6" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,6,0">
                     <Path Data="{StaticResource Icon.Monitor}" Style="{StaticResource IconPath}" Width="13" Height="13" Margin="0,0,6,0"
                           Stroke="{DynamicResource PresenceInGameBrush}"
@@ -362,9 +362,9 @@
                             <ColumnDefinition Width="26" />
                             <ColumnDefinition Width="44" />
                             <ColumnDefinition Width="*" MinWidth="120" />
-                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="160" />
                             <ColumnDefinition Width="86" />
-                            <ColumnDefinition Width="78" />
+                            <ColumnDefinition Width="96" />
                             <ColumnDefinition Width="52" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="2" Text="{DynamicResource Str.Accounts.Column.Account}" Style="{StaticResource ColumnHeader}" />
@@ -413,7 +413,7 @@
                     <!-- empty: no accounts at all -->
                     <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360"
                                 Visibility="{Binding IsStoreEmpty, Converter={StaticResource BoolToVis}}">
-                        <Border Width="52" Height="52" CornerRadius="16" HorizontalAlignment="Center" Background="{DynamicResource SurfaceAltBrush}">
+                        <Border Width="52" Height="52" CornerRadius="10" HorizontalAlignment="Center" Background="{DynamicResource SurfaceAltBrush}">
                             <Path Data="{StaticResource Icon.UserPlus}" Style="{StaticResource IconPath}" Width="22" Height="22" HorizontalAlignment="Center" />
                         </Border>
                         <TextBlock Text="{DynamicResource Str.Accounts.Empty.Title}" Style="{StaticResource Text.Heading}" HorizontalAlignment="Center" Margin="0,16,0,6" />
@@ -479,7 +479,7 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <ctl:AvatarView Width="52" Height="52" CornerRadius="14" PipSize="13"
+                                <ctl:AvatarView Width="52" Height="52" CornerRadius="10" PipSize="13"
                                                 ImageUrl="{Binding Selected.ThumbnailUrl}" NameText="{Binding Selected.Username}"
                                                 Presence="{Binding Selected.Presence}" RingBrush="{DynamicResource SurfaceBrush}" />
                                 <StackPanel Grid.Column="1" Margin="14,0,8,0" VerticalAlignment="Center">
@@ -550,7 +550,7 @@
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
-                                        <Border Width="40" Height="40" CornerRadius="9">
+                                        <Border Width="40" Height="40" CornerRadius="8">
                                             <Border.Background>
                                                 <ImageBrush Stretch="UniformToFill" ImageSource="{Binding GameIcon, Converter={StaticResource UrlToImage}}" />
                                             </Border.Background>
@@ -599,8 +599,8 @@
                                                                                     <ColumnDefinition Width="Auto" />
                                                                                     <ColumnDefinition Width="*" />
                                                                                 </Grid.ColumnDefinitions>
-                                                                                <Border Width="28" Height="28" CornerRadius="7" Background="{DynamicResource SurfaceAltBrush}">
-                                                                                    <Border CornerRadius="7">
+                                                                                <Border Width="28" Height="28" CornerRadius="6" Background="{DynamicResource SurfaceAltBrush}">
+                                                                                    <Border CornerRadius="6">
                                                                                         <Border.Background>
                                                                                             <ImageBrush Stretch="UniformToFill" ImageSource="{Binding IconUrl, Converter={StaticResource UrlToImage}}" />
                                                                                         </Border.Background>
@@ -789,8 +789,8 @@
                                                     <Button.Template>
                                                         <ControlTemplate TargetType="Button">
                                                             <Grid>
-                                                                <Border x:Name="ring" CornerRadius="12" BorderThickness="2" BorderBrush="Transparent" />
-                                                                <Border Margin="4" CornerRadius="8" Background="{Binding Converter={StaticResource HexToBrush}}" />
+                                                                <Border x:Name="ring" CornerRadius="6" BorderThickness="2" BorderBrush="Transparent" />
+                                                                <Border Margin="4" CornerRadius="3" Background="{Binding Converter={StaticResource HexToBrush}}" />
                                                             </Grid>
                                                             <ControlTemplate.Triggers>
                                                                 <Trigger Property="IsMouseOver" Value="True">

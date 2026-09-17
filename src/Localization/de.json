@@ -1147,9 +1147,9 @@
   "Diagnostics.License": "Open Source auf GitHub",
   "Diagnostics.Report": "Problem melden",
   "Time.TodayAt": "Heute, {0}",
-  "Time.HoursMinutes": "{0} Std. {1} Min.",
-  "Time.Minutes": "{0} Min.",
-  "Time.UnderMinute": "<1 Min.",
+  "Time.HoursMinutes": "{0} h {1} min",
+  "Time.Minutes": "{0} min",
+  "Time.UnderMinute": "<1 min",
   "Playtime.NeverPlayed": "Nie",
   "Window.Restore": "Wiederherstellen",
   "Diagnostics.OpenFolderFailed": "Der Ordner konnte nicht geöffnet werden"

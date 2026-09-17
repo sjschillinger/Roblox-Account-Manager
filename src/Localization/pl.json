@@ -1192,7 +1192,7 @@
   "Diagnostics.License": "Otwarte źródło na GitHubie",
   "Diagnostics.Report": "Zgłoś problem",
   "Time.TodayAt": "Dziś, {0}",
-  "Time.HoursMinutes": "{0} godz. {1} min",
+  "Time.HoursMinutes": "{0} h {1} min",
   "Time.Minutes": "{0} min",
   "Time.UnderMinute": "<1 min",
   "Playtime.NeverPlayed": "Nigdy",

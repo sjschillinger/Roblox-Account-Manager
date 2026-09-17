@@ -98,7 +98,7 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <Border x:Name="sw" Width="22" Height="22" CornerRadius="6" BorderThickness="1"
+                            <Border x:Name="sw" Width="22" Height="22" CornerRadius="{StaticResource RadiusSm}" BorderThickness="1"
                                     BorderBrush="{DynamicResource HairlineStrongBrush}" Background="{Binding Hex, Converter={StaticResource HexToBrush}}" />
                             <TextBlock Grid.Column="1" Text="{Binding Label}" Margin="10,0,8,0" VerticalAlignment="Center"
                                        Foreground="{DynamicResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis" />

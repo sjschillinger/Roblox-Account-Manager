@@ -41,7 +41,7 @@
                 </Grid>
             </StackPanel>
 
-            <Border Grid.Row="1" Background="{DynamicResource SurfaceAltBrush}" CornerRadius="0,0,11,11"
+            <Border Grid.Row="1" Background="{DynamicResource SurfaceAltBrush}" CornerRadius="0,0,7,7"
                     BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="24,14">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button x:Name="StartAnywayButton" Style="{StaticResource Btn.Secondary}" Visibility="Collapsed" Margin="0,0,8,0" Click="StartAnyway_Click" />

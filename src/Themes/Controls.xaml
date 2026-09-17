@@ -14,7 +14,7 @@
         <Setter Property="Control.Template">
             <Setter.Value>
                 <ControlTemplate>
-                    <Border Margin="-3" CornerRadius="10" BorderThickness="2"
+                    <Border Margin="-3" CornerRadius="8" BorderThickness="2"
                             BorderBrush="{DynamicResource FocusBrush}" SnapsToDevicePixels="True" />
                 </ControlTemplate>
             </Setter.Value>
@@ -97,6 +97,7 @@
     <Style x:Key="Text.Metric" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
         <Setter Property="FontSize" Value="24" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="TextOptions.TextFormattingMode" Value="Ideal" />
@@ -141,7 +142,7 @@
     </Style>
 
     <Style x:Key="Badge" TargetType="Border">
-        <Setter Property="CornerRadius" Value="{StaticResource RadiusPill}" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
         <Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}" />
         <Setter Property="Padding" Value="7,1,7,2" />
         <Setter Property="VerticalAlignment" Value="Center" />
@@ -360,7 +361,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="bd" CornerRadius="{StaticResource RadiusPill}" Padding="{TemplateBinding Padding}"
+                    <Border x:Name="bd" CornerRadius="{StaticResource RadiusMd}" Padding="{TemplateBinding Padding}"
                             Background="Transparent" BorderBrush="{DynamicResource HairlineStrongBrush}" BorderThickness="1">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <ContentPresenter VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}" />
@@ -409,7 +410,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="bd" CornerRadius="6" Padding="{TemplateBinding Padding}" Background="Transparent"
+                    <Border x:Name="bd" CornerRadius="{StaticResource RadiusSm}" Padding="{TemplateBinding Padding}" Background="Transparent"
                             BorderThickness="1" BorderBrush="Transparent">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Path x:Name="icon" Data="{TemplateBinding ctl:Ui.Icon}" Style="{StaticResource IconPath}"
@@ -663,7 +664,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Border x:Name="box" Width="16" Height="16" CornerRadius="4" VerticalAlignment="Center"
+                        <Border x:Name="box" Width="16" Height="16" CornerRadius="{StaticResource RadiusXs}" VerticalAlignment="Center"
                                 Background="{DynamicResource SurfaceAltBrush}"
                                 BorderBrush="{DynamicResource HairlineStrongBrush}" BorderThickness="1.5">
                             <Path x:Name="check" Data="{StaticResource Icon.Check}" Width="10" Height="10"
@@ -702,8 +703,8 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="CheckBox">
-                    <Border x:Name="track" Width="36" Height="20" CornerRadius="10" Background="{DynamicResource HairlineStrongBrush}">
-                        <Border x:Name="thumb" Width="14" Height="14" CornerRadius="7" HorizontalAlignment="Left"
+                    <Border x:Name="track" Width="36" Height="20" CornerRadius="{StaticResource RadiusMd}" Background="{DynamicResource HairlineStrongBrush}">
+                        <Border x:Name="thumb" Width="14" Height="14" CornerRadius="{StaticResource RadiusXs}" HorizontalAlignment="Left"
                                 Margin="3,0,0,0" Background="{DynamicResource TextMutedBrush}">
                             <Border.RenderTransform>
                                 <TranslateTransform x:Name="shift" X="0" />

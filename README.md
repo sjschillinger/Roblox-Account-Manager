@@ -66,7 +66,7 @@ The full list, including what to know before updating, is in the [changelog](CHA
 - Global hotkeys, a command line (`--launch`), a local HTTP API and plugins
 
 **Look and feel**
-- Light, dark or system theme, six accent colors and comfortable or compact density
+- Light, dark or system theme, six accent colors, your own colors and a compact list view
 - Command palette (**Ctrl+K**) for every account, page, setting and action
 - Settings in categories with search
 - Frame-rate cap and FastFlags that follow Roblox's current allowlist
