@@ -1,0 +1,339 @@
+<UserControl x:Class="RobloxAccountManager.Views.AutomationPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:RobloxAccountManager.Controls"
+             xmlns:vm="clr-namespace:RobloxAccountManager.ViewModels"
+             xmlns:models="clr-namespace:RobloxAccountManager.Models">
+
+    <UserControl.Resources>
+        <Style x:Key="DayChip" TargetType="ToggleButton" BasedOn="{StaticResource Chip}">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Width" Value="40" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="64" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="28,0,150,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,6,0,0">
+                <TextBlock Text="{DynamicResource Str.Automation.Title}" Style="{StaticResource Text.Title}" />
+                <TextBlock Text="{DynamicResource Str.Automation.Subtitle}" Style="{StaticResource Text.Caption}" FontSize="13" Margin="14,4,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,6,0,0">
+                <Button Style="{StaticResource Btn.Secondary}" ctl:Ui.Icon="{StaticResource Icon.Layers}" Margin="0,0,8,0"
+                        Content="{DynamicResource Str.Automation.NewPreset}" Command="{Binding AddPresetCommand}" />
+                <Button Style="{StaticResource Btn.Primary}" ctl:Ui.Icon="{StaticResource Icon.Clock}"
+                        Content="{DynamicResource Str.Automation.NewSchedule}" Command="{Binding AddScheduleCommand}" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Section switch -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="28,4,28,14">
+            <Border Style="{StaticResource Segmented}">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton GroupName="autoSection" Style="{StaticResource Segment}" ctl:Ui.Icon="{StaticResource Icon.Layers}"
+                                 Content="{DynamicResource Str.Automation.Presets}"
+                                 IsChecked="{Binding Section, Converter={StaticResource EqualsToBool}, ConverterParameter=Presets}" />
+                    <RadioButton GroupName="autoSection" Style="{StaticResource Segment}" ctl:Ui.Icon="{StaticResource Icon.Calendar}"
+                                 Content="{DynamicResource Str.Automation.Schedules}"
+                                 IsChecked="{Binding Section, Converter={StaticResource EqualsToBool}, ConverterParameter=Schedules}" />
+                </StackPanel>
+            </Border>
+            <TextBlock Text="{DynamicResource Str.Automation.RunsWhileOpen}" Style="{StaticResource Text.Caption}" VerticalAlignment="Center" Margin="16,0,0,0" />
+        </StackPanel>
+
+        <!-- ======================= PRESETS ======================= -->
+        <Grid Grid.Row="2" Margin="28,0,28,22" Visibility="{Binding Section, Converter={StaticResource EqualsToVis}, ConverterParameter=Presets}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="320" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Style="{StaticResource Panel}">
+                <Grid>
+                    <ListBox Style="{StaticResource PlainList}" Padding="6" ItemsSource="{Binding Presets}" SelectedItem="{Binding SelectedPreset, Mode=TwoWay}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:PresetItem}">
+                                <Grid Height="40">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}" FontWeight="Medium" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <TextBlock Text="{Binding Summary}" FontSize="12" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextMutedBrush}" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Style="{StaticResource Btn.Icon}" Width="30" Height="30" ctl:Ui.Icon="{StaticResource Icon.Play}"
+                                            ToolTip="{DynamicResource Str.Automation.RunNow}"
+                                            Command="{Binding DataContext.RunPresetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24" MaxWidth="250"
+                                Visibility="{Binding Presets.Count, Converter={StaticResource CountZeroToVis}}">
+                        <Path Data="{StaticResource Icon.Layers}" Style="{StaticResource IconPath}" Width="24" Height="24"
+                              Stroke="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" />
+                        <TextBlock Text="{DynamicResource Str.Automation.Preset.Empty}" Style="{StaticResource Text.Caption}" FontSize="12.5"
+                                   TextAlignment="Center" Margin="0,12,0,12" />
+                        <Button Style="{StaticResource Btn.Secondary}" HorizontalAlignment="Center" ctl:Ui.Icon="{StaticResource Icon.Plus}"
+                                Content="{DynamicResource Str.Automation.NewPreset}" Command="{Binding AddPresetCommand}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="2" Style="{StaticResource Panel}">
+                <Grid>
+                    <TextBlock Text="{DynamicResource Str.Automation.Preset.Pick}" Style="{StaticResource Text.Caption}" FontSize="12.5"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Visibility="{Binding HasPreset, Converter={StaticResource InverseBoolToVis}}" />
+                    <Grid DataContext="{Binding SelectedPreset}" Margin="22,20"
+                          Visibility="{Binding DataContext.HasPreset, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding Name, UpdateSourceTrigger=LostFocus}" FontSize="16" FontWeight="SemiBold" Height="38"
+                                     ctl:Ui.Placeholder="{DynamicResource Str.Automation.Preset.Name}" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
+                                <Button Style="{StaticResource Btn.Primary}" ctl:Ui.Icon="{StaticResource Icon.Play}" Height="38"
+                                        Content="{DynamicResource Str.Automation.RunNow}"
+                                        Command="{Binding DataContext.RunPresetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
+                                <Button Style="{StaticResource Btn.Icon}" Width="38" Height="38" Margin="6,0,0,0" ctl:Ui.Icon="{StaticResource Icon.Trash}"
+                                        ToolTip="{DynamicResource Str.Common.Delete}"
+                                        Command="{Binding DataContext.DeletePresetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Grid.Row="1" Margin="0,18,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="140" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="{DynamicResource Str.Automation.Place}" Style="{StaticResource Text.Label}" />
+                                <TextBox Text="{Binding PlaceIdText, UpdateSourceTrigger=LostFocus}" ctl:Ui.Icon="{StaticResource Icon.Gamepad}" ctl:Ui.Placeholder="Place ID" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="{DynamicResource Str.Automation.Server}" Style="{StaticResource Text.Label}" />
+                                <TextBox Text="{Binding JobId, UpdateSourceTrigger=LostFocus}" ctl:Ui.Icon="{StaticResource Icon.Link}"
+                                         ctl:Ui.Placeholder="{DynamicResource Str.Common.Optional}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="4">
+                                <TextBlock Text="{DynamicResource Str.Automation.Delay}" Style="{StaticResource Text.Label}" />
+                                <TextBox Text="{Binding JoinDelaySeconds, UpdateSourceTrigger=LostFocus}" ctl:Ui.Icon="{StaticResource Icon.Timer}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Grid.Row="2" Margin="0,18,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="{DynamicResource Str.Automation.Accounts}" Style="{StaticResource Text.Label}" />
+                            <Border Grid.Row="1" Style="{StaticResource Panel.Inset}" Padding="4">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding Members}" Focusable="False">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:PresetMember}">
+                                                <CheckBox Width="230" Height="38" Margin="6,2" IsChecked="{Binding IsIncluded}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <ctl:AvatarView Width="24" Height="24" CornerRadius="7" ImageUrl="{Binding Account.ThumbnailUrl}"
+                                                                        NameText="{Binding Account.Username}" />
+                                                        <TextBlock Text="{Binding Account.DisplayNameOrUser}" Margin="9,0,0,0" VerticalAlignment="Center"
+                                                                   TextTrimming="CharacterEllipsis" MaxWidth="160" />
+                                                    </StackPanel>
+                                                </CheckBox>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+                        </Grid>
+
+                        <TextBlock Grid.Row="3" Text="{DynamicResource Str.Automation.Preset.Hint}" Style="{StaticResource Text.Caption}" Margin="0,12,0,0" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ======================= SCHEDULES ======================= -->
+        <Grid Grid.Row="2" Margin="28,0,28,22" Visibility="{Binding Section, Converter={StaticResource EqualsToVis}, ConverterParameter=Schedules}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="320" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Style="{StaticResource Panel}">
+                <Grid>
+                    <ListBox Style="{StaticResource PlainList}" Padding="6" ItemsSource="{Binding Schedules}" SelectedItem="{Binding SelectedSchedule, Mode=TwoWay}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:ScheduleItem}">
+                                <Grid Height="46">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
+                                        <TextBlock Text="{Binding Name}" FontWeight="Medium" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <TextBlock Text="{Binding Summary}" FontSize="12" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextMutedBrush}" />
+                                        <TextBlock Text="{Binding NextRunText}" FontSize="11.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    </StackPanel>
+                                    <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24" MaxWidth="250"
+                                Visibility="{Binding Schedules.Count, Converter={StaticResource CountZeroToVis}}">
+                        <Path Data="{StaticResource Icon.Calendar}" Style="{StaticResource IconPath}" Width="24" Height="24"
+                              Stroke="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" />
+                        <TextBlock Text="{DynamicResource Str.Automation.Schedule.Empty}" Style="{StaticResource Text.Caption}" FontSize="12.5"
+                                   TextAlignment="Center" Margin="0,12,0,12" />
+                        <Button Style="{StaticResource Btn.Secondary}" HorizontalAlignment="Center" ctl:Ui.Icon="{StaticResource Icon.Plus}"
+                                Content="{DynamicResource Str.Automation.NewSchedule}" Command="{Binding AddScheduleCommand}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="2" Style="{StaticResource Panel}">
+                <Grid>
+                    <TextBlock Text="{DynamicResource Str.Automation.Schedule.Pick}" Style="{StaticResource Text.Caption}" FontSize="12.5"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Visibility="{Binding HasSchedule, Converter={StaticResource InverseBoolToVis}}" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  Visibility="{Binding HasSchedule, Converter={StaticResource BoolToVis}}">
+                        <StackPanel DataContext="{Binding SelectedSchedule}" Margin="22,20">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding Name, UpdateSourceTrigger=LostFocus}" FontSize="16" FontWeight="SemiBold" Height="38"
+                                         ctl:Ui.Placeholder="{DynamicResource Str.Automation.Schedule.Name}" />
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
+                                    <Button Style="{StaticResource Btn.Secondary}" ctl:Ui.Icon="{StaticResource Icon.Play}" Height="38"
+                                            Content="{DynamicResource Str.Automation.RunNow}"
+                                            Command="{Binding DataContext.RunScheduleNowCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
+                                    <Button Style="{StaticResource Btn.Icon}" Width="38" Height="38" Margin="6,0,0,0" ctl:Ui.Icon="{StaticResource Icon.Trash}"
+                                            ToolTip="{DynamicResource Str.Common.Delete}"
+                                            Command="{Binding DataContext.DeleteScheduleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Border Style="{StaticResource Panel}" Margin="0,18,0,0" Background="{DynamicResource SurfaceBrush}">
+                                <ctl:DividerStack>
+                                    <ctl:SettingItem Title="{DynamicResource Str.Automation.Schedule.Enabled}" Description="{Binding NextRunText}">
+                                        <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" />
+                                    </ctl:SettingItem>
+                                    <ctl:SettingItem Title="{DynamicResource Str.Automation.Schedule.Action}">
+                                        <Border Style="{StaticResource Segmented}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton GroupName="schedAction" Style="{StaticResource Segment}" Content="{DynamicResource Str.Automation.Schedule.Launch}"
+                                                             IsChecked="{Binding Action, Converter={StaticResource EqualsToBool}, ConverterParameter=Launch}" />
+                                                <RadioButton GroupName="schedAction" Style="{StaticResource Segment}" Content="{DynamicResource Str.Automation.Schedule.Close}"
+                                                             IsChecked="{Binding Action, Converter={StaticResource EqualsToBool}, ConverterParameter=Close}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </ctl:SettingItem>
+                                    <ctl:SettingItem Title="{DynamicResource Str.Automation.Schedule.Target}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Style="{StaticResource Segmented}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <RadioButton GroupName="schedTarget" Style="{StaticResource Segment}" Content="{DynamicResource Str.Automation.Schedule.Preset}"
+                                                                 IsChecked="{Binding TargetKind, Converter={StaticResource EqualsToBool}, ConverterParameter=Preset}" />
+                                                    <RadioButton GroupName="schedTarget" Style="{StaticResource Segment}" Content="{DynamicResource Str.Automation.Schedule.Account}"
+                                                                 IsChecked="{Binding TargetKind, Converter={StaticResource EqualsToBool}, ConverterParameter=Account}" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ComboBox Width="210" Margin="10,0,0,0"
+                                                      ItemsSource="{Binding DataContext.PresetNames, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                      SelectedItem="{Binding PresetName, Mode=TwoWay}"
+                                                      ctl:Ui.Placeholder="{DynamicResource Str.Automation.Schedule.PickPreset}"
+                                                      Visibility="{Binding IsAccountTarget, Converter={StaticResource InverseBoolToVis}}" />
+                                            <ComboBox Width="210" Margin="10,0,0,0"
+                                                      ItemsSource="{Binding DataContext.Accounts, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                      SelectedItem="{Binding Account, Mode=TwoWay}" DisplayMemberPath="DisplayNameOrUser"
+                                                      ctl:Ui.Placeholder="{DynamicResource Str.Automation.Schedule.PickAccount}"
+                                                      Visibility="{Binding IsAccountTarget, Converter={StaticResource BoolToVis}}" />
+                                        </StackPanel>
+                                    </ctl:SettingItem>
+                                    <ctl:SettingItem Title="{DynamicResource Str.Automation.Place}" Description="{DynamicResource Str.Automation.Schedule.PlaceDesc}">
+                                        <ctl:SettingItem.Style>
+                                            <Style TargetType="ctl:SettingItem" BasedOn="{StaticResource {x:Type ctl:SettingItem}}">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding IsAccountTarget}" Value="True" />
+                                                            <Condition Binding="{Binding IsLaunch}" Value="True" />
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ctl:SettingItem.Style>
+                                        <TextBox Width="210" Text="{Binding PlaceIdText, UpdateSourceTrigger=LostFocus}" ctl:Ui.Icon="{StaticResource Icon.Gamepad}" />
+                                    </ctl:SettingItem>
+                                    <ctl:SettingItem Title="{DynamicResource Str.Automation.Schedule.Time}" Description="{DynamicResource Str.Automation.Schedule.TimeDesc}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{DynamicResource Str.Automation.Schedule.TimeInvalid}" Foreground="{DynamicResource DangerBrush}" FontSize="12"
+                                                       VerticalAlignment="Center" Margin="0,0,10,0"
+                                                       Visibility="{Binding TimeValid, Converter={StaticResource InverseBoolToVis}}" />
+                                            <TextBox Width="100" Text="{Binding Time, UpdateSourceTrigger=LostFocus}" ctl:Ui.Icon="{StaticResource Icon.Clock}"
+                                                     FontFamily="{StaticResource MonoFont}" />
+                                        </StackPanel>
+                                    </ctl:SettingItem>
+                                    <ctl:SettingItem Title="{DynamicResource Str.Automation.Schedule.Days}" Description="{DynamicResource Str.Automation.Schedule.DaysDesc}" IsStacked="True">
+                                        <ItemsControl ItemsSource="{Binding Days}" Focusable="False">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="{x:Type vm:DayToggle}">
+                                                    <ToggleButton Style="{StaticResource DayChip}" Content="{Binding Label}" IsChecked="{Binding IsOn}" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ctl:SettingItem>
+                                    <ctl:SettingItem Title="{DynamicResource Str.Automation.Schedule.AutoClose}" Description="{DynamicResource Str.Automation.Schedule.AutoCloseDesc}"
+                                                     Visibility="{Binding IsLaunch, Converter={StaticResource BoolToVis}}">
+                                        <TextBox Width="100" Text="{Binding AutoCloseAfterMinutes, UpdateSourceTrigger=LostFocus}" ctl:Ui.Icon="{StaticResource Icon.Timer}" />
+                                    </ctl:SettingItem>
+                                </ctl:DividerStack>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -78,6 +78,10 @@ public static class WatchdogService
         // rather than posting "External client crashed (place 0)" to Discord.
         if (t.IsExternal || t.UserId == 0) return;
 
+        // Closed on purpose through the manager (close button, "close all", relaunch, scheduler):
+        // not a crash, nothing to report and nothing to rejoin.
+        if (t.ClosingIntentionally) return;
+
         var s = SettingsService.Current;
         if (!s.WatchdogEnabled) return;
 
@@ -87,7 +91,7 @@ public static class WatchdogService
             WebhookService.Disconnected(t.Alias, acc?.ThumbnailUrl, t.PlaceId);
 
         if (s.ToastOnCrash)
-            ToastService.Warning("Client closed", $"{t.Alias} closed or crashed (place {t.PlaceId}).");
+            ToastService.Warning(L.T("Toast.ClientClosed.Title"), L.T("Toast.ClientClosed.Body", t.Alias));
 
         if (acc == null || !acc.AutoRejoin) return;
 
@@ -96,8 +100,8 @@ public static class WatchdogService
             // Crash loop: give up instead of relaunching forever.
             int mins = (int)RejoinWindow.TotalMinutes;
             if (s.ToastOnCrash)
-                ToastService.Warning("Auto-rejoin paused",
-                    $"{t.Alias} crashed {MaxRejoins} times within {mins} min — not rejoining.");
+                ToastService.Warning(L.T("Toast.RejoinPaused.Title"),
+                    L.T("Toast.RejoinPaused.Body", t.Alias, MaxRejoins, mins));
             if (WebhookService.Configured)
                 WebhookService.ReconnectFailed(t.Alias, acc.ThumbnailUrl, t.PlaceId,
                     $"crash loop: {MaxRejoins} rejoins in {mins} min, giving up");
@@ -114,6 +118,7 @@ public static class WatchdogService
         try
         {
             await Task.Delay(3000); // let the crashed process fully die first
+            if (LockService.IsLocked) return;
             var result = await LauncherService.LaunchAsync(acc, t.PlaceId, t.JobId);
             if (WebhookService.Configured)
             {

@@ -58,9 +58,12 @@ public static class RobloxAuthService
     public sealed record TwoStepChallenge(long UserId, string MediaType, string ChallengeId, string? HeaderChallengeId)
     {
         /// <summary>Human wording for the dialog, e.g. "your authenticator app".</summary>
-        public string SourceText => MediaType.Equals("email", StringComparison.OrdinalIgnoreCase)
-            ? "the email Roblox just sent you"
-            : "your authenticator app";
+        public string SourceText => MediaType.ToLowerInvariant() switch
+        {
+            "email" => L.T("Auth.Source.Email"),
+            "sms" => L.T("Auth.Source.Sms"),
+            _ => L.T("Auth.Source.Authenticator"),
+        };
     }
 
     /// <summary>Outcome of one login or two-step step.</summary>
@@ -74,8 +77,8 @@ public static class RobloxAuthService
     public static async Task<LoginResult> LoginAsync(string username, string password, CancellationToken ct = default)
     {
         username = (username ?? "").Trim();
-        if (username.Length == 0) return new(LoginOutcome.Failed, "Enter the Roblox username.");
-        if (string.IsNullOrEmpty(password)) return new(LoginOutcome.Failed, "Enter the password.");
+        if (username.Length == 0) return new(LoginOutcome.Failed, L.T("Auth.NeedUsername"));
+        if (string.IsNullOrEmpty(password)) return new(LoginOutcome.Failed, L.T("Auth.NeedPassword"));
 
         using var http = BuildClient();
         return await PostLoginAsync(http, username, password, challengeHeaders: null, ct).ConfigureAwait(false);
@@ -90,7 +93,7 @@ public static class RobloxAuthService
         TwoStepChallenge challenge, string code, CancellationToken ct = default)
     {
         code = new string((code ?? "").Where(char.IsDigit).ToArray());
-        if (code.Length == 0) return new(LoginOutcome.TwoStepRequired, "Enter the verification code.", TwoStep: challenge);
+        if (code.Length == 0) return new(LoginOutcome.TwoStepRequired, L.T("Auth.NeedCode"), TwoStep: challenge);
 
         using var http = BuildClient();
 
@@ -126,7 +129,7 @@ public static class RobloxAuthService
         IDictionary<string, string>? challengeHeaders, CancellationToken ct)
     {
         string? csrf = await FetchCsrfAsync(http, ct).ConfigureAwait(false);
-        string lastError = "Roblox did not answer the login request.";
+        string lastError = L.T("Auth.NoAnswer");
 
         // Up to three attempts: the CSRF token rotates freely and a stale one comes back as a
         // 403 carrying the replacement, which would otherwise read as a failed login.
@@ -154,15 +157,14 @@ public static class RobloxAuthService
                     if (!string.IsNullOrEmpty(fresh) && fresh != csrf)
                     {
                         csrf = fresh;
-                        lastError = "The security token rotated.";
+                        lastError = L.T("Auth.NoAnswer");
                         continue;   // replay with the token Roblox just handed us
                     }
                 }
 
                 if ((int)resp.StatusCode == 429)
                 {
-                    return new(LoginOutcome.RateLimited,
-                        "Roblox is rate-limiting sign-ins from this connection. Wait a few minutes and try again.");
+                    return new(LoginOutcome.RateLimited, L.T("Auth.RateLimited"));
                 }
 
                 // An interactive challenge (captcha, device confirmation) — only a browser can answer it.
@@ -175,13 +177,11 @@ public static class RobloxAuthService
                         if (fromHeader != null)
                         {
                             return new(LoginOutcome.TwoStepRequired,
-                                $"Enter the 6-digit code from {fromHeader.SourceText}.", TwoStep: fromHeader);
+                                L.T("Auth.EnterCode", fromHeader.SourceText), TwoStep: fromHeader);
                         }
                     }
 
-                    return new(LoginOutcome.ChallengeRequired,
-                        "Roblox wants to verify this sign-in in a browser window. Use \"Sign in with browser\" — "
-                        + "the account is added automatically once you are logged in.");
+                    return new(LoginOutcome.ChallengeRequired, L.T("Auth.Challenge"));
                 }
 
                 if (resp.IsSuccessStatusCode)
@@ -191,13 +191,13 @@ public static class RobloxAuthService
                     if (fromBody != null)
                     {
                         return new(LoginOutcome.TwoStepRequired,
-                            $"Enter the 6-digit code from {fromBody.SourceText}.", TwoStep: fromBody);
+                            L.T("Auth.EnterCode", fromBody.SourceText), TwoStep: fromBody);
                     }
 
                     string? cookie = ExtractRoblosecurity(resp);
-                    if (cookie != null) return new(LoginOutcome.Success, "Signed in.", cookie);
+                    if (cookie != null) return new(LoginOutcome.Success, L.T("Auth.SignedIn"), cookie);
 
-                    lastError = "Roblox accepted the sign-in but returned no session cookie.";
+                    lastError = L.T("Auth.NoCookie");
                     break;
                 }
 
@@ -205,10 +205,10 @@ public static class RobloxAuthService
                 if (resp.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized or HttpStatusCode.BadRequest)
                 {
                     return new(LoginOutcome.InvalidCredentials,
-                        apiMessage ?? "Roblox rejected that username and password.");
+                        apiMessage ?? L.T("Auth.Rejected"));
                 }
 
-                lastError = apiMessage ?? $"Roblox answered HTTP {(int)resp.StatusCode}.";
+                lastError = apiMessage ?? L.T("Auth.Http", (int)resp.StatusCode);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { lastError = ex.Message; }
@@ -254,17 +254,16 @@ public static class RobloxAuthService
                     using var doc = JsonDocument.Parse(body);
                     if (doc.RootElement.TryGetProperty("verificationToken", out var t) && t.GetString() is { Length: > 0 } tok)
                         return (tok, "");
-                    return (null, "Roblox accepted the code but returned no verification token.");
+                    return (null, L.T("Auth.NoToken"));
                 }
 
-                return (null, FirstApiError(body)
-                    ?? "That code was not accepted. Codes expire after 30 seconds — try the next one.");
+                return (null, FirstApiError(body) ?? L.T("Auth.CodeRejected"));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { return (null, ex.Message); }
         }
 
-        return (null, "The verification request could not be completed.");
+        return (null, L.T("Auth.NoAnswer"));
     }
 
     /// <summary>Two-step details from the older body shape (<c>twoStepVerificationData</c>).</summary>
@@ -354,7 +353,7 @@ public static class RobloxAuthService
         var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(25) };
         // The login endpoint is browser-facing and rejects obviously non-browser callers.
         client.DefaultRequestHeaders.UserAgent.ParseAdd(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36");
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36");
         return client;
     }
 

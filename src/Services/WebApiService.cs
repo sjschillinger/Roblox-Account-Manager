@@ -15,10 +15,11 @@ namespace RobloxAccountManager.Services;
 ///   GET  /ping                                  health, no auth
 ///   GET  /accounts                              list (no cookies)
 ///   POST /launch?account=&amp;placeId=&amp;jobId=       launch one account
-///   POST /close?account=                        kill that account's tracked clients
+///   POST /close?account=                        close that account's tracked clients
 ///   GET  /status?account=                       presence snapshot
-///   GET  /cookie?account=                       .ROBLOSECURITY (sensitive)
+///   GET  /cookie?account=                       .ROBLOSECURITY (sensitive; off unless enabled in Settings)
 /// Auth: "Authorization: Bearer &lt;token&gt;" header or "?token=&lt;token&gt;".
+/// Requests carrying an Origin header (i.e. from a web page) or a non-loopback Host are refused.
 /// </summary>
 public static class WebApiService
 {
@@ -91,6 +92,23 @@ public static class WebApiService
             var path = req.Url?.AbsolutePath.TrimEnd('/').ToLowerInvariant() ?? "";
             if (path.Length == 0) path = "/ping";
 
+            // DNS-rebinding guard: a web page that resolves its own hostname to 127.0.0.1 would reach
+            // this server with a foreign Host header. Only literal loopback names are accepted.
+            if (!IsLoopbackHost(req))
+            {
+                await WriteJsonAsync(ctx, 403, new { error = "forbidden host" });
+                return;
+            }
+
+            // Browsers attach an Origin header to cross-site requests; scripts and tools do not. No
+            // legitimate client of this API is a web page, so refusing those closes the whole class of
+            // drive-by requests from a site the user happens to have open.
+            if (!string.IsNullOrEmpty(req.Headers["Origin"]))
+            {
+                await WriteJsonAsync(ctx, 403, new { error = "browser requests are not allowed" });
+                return;
+            }
+
             // Health check is the only unauthenticated route.
             if (path == "/ping")
             {
@@ -98,25 +116,77 @@ public static class WebApiService
                 return;
             }
 
+            if (IsThrottled())
+            {
+                await WriteJsonAsync(ctx, 429, new { error = "too many failed attempts" });
+                return;
+            }
+
             if (!IsAuthorized(req))
             {
+                NoteFailure();
                 await WriteJsonAsync(ctx, 401, new { error = "unauthorized" });
                 return;
             }
 
+            if (LockService.IsLocked && path != "/accounts" && path != "/status")
+            {
+                await WriteJsonAsync(ctx, 423, new { error = "the manager is locked" });
+                return;
+            }
+
+            bool isPost = req.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase);
             switch (path)
             {
                 case "/accounts": await HandleAccountsAsync(ctx); break;
-                case "/launch":   await HandleLaunchAsync(ctx);   break;
-                case "/close":    await HandleCloseAsync(ctx);    break;
                 case "/status":   await HandleStatusAsync(ctx);   break;
-                case "/cookie":   await HandleCookieAsync(ctx);   break;
-                default:          await WriteJsonAsync(ctx, 404, new { error = "not found" }); break;
+                case "/launch" when isPost: await HandleLaunchAsync(ctx); break;
+                case "/close" when isPost:  await HandleCloseAsync(ctx);  break;
+                case "/launch" or "/close":
+                    await WriteJsonAsync(ctx, 405, new { error = "use POST" });
+                    break;
+                case "/cookie":
+                    if (SettingsService.Current.WebApiAllowCookieRead) await HandleCookieAsync(ctx);
+                    else await WriteJsonAsync(ctx, 403, new { error = "cookie access is disabled in Settings" });
+                    break;
+                default: await WriteJsonAsync(ctx, 404, new { error = "not found" }); break;
             }
         }
         catch
         {
             try { await WriteJsonAsync(ctx, 500, new { error = "internal" }); } catch { }
+        }
+    }
+
+    private static bool IsLoopbackHost(HttpListenerRequest req)
+    {
+        string host = (req.UserHostName ?? "").ToLowerInvariant();
+        int colon = host.LastIndexOf(':');
+        if (colon > 0 && !host.EndsWith("]")) host = host[..colon];
+        return host is "127.0.0.1" or "localhost" or "[::1]";
+    }
+
+    // ---- brute-force brake ----
+    private static readonly Queue<DateTime> _failures = new();
+
+    private static void NoteFailure()
+    {
+        lock (_failures)
+        {
+            _failures.Enqueue(DateTime.UtcNow);
+            while (_failures.Count > 50) _failures.Dequeue();
+        }
+        AuditLogService.Log(AuditLogService.Category.Security, "Local API: request with a wrong token");
+    }
+
+    /// <summary>More than 10 bad tokens in a minute locks the API for the rest of that minute.</summary>
+    private static bool IsThrottled()
+    {
+        lock (_failures)
+        {
+            var cutoff = DateTime.UtcNow.AddMinutes(-1);
+            while (_failures.Count > 0 && _failures.Peek() < cutoff) _failures.Dequeue();
+            return _failures.Count >= 10;
         }
     }
 
@@ -159,7 +229,9 @@ public static class WebApiService
                 group = a.Group,
                 presence = a.Presence,
                 robux = a.Robux,
-                valid = a.IsValid
+                valid = a.IsValid,
+                health = a.Health,
+                running = a.RunningClients
             });
         await WriteJsonAsync(ctx, 200, list);
     }
@@ -182,19 +254,8 @@ public static class WebApiService
         var acc = Resolve(ctx.Request.QueryString["account"]);
         if (acc == null) { await WriteJsonAsync(ctx, 404, new { error = "account not found" }); return; }
 
-        int killed = 0;
-        foreach (var t in ProcessRegistry.ForUser(acc.UserId).ToList())
-        {
-            try
-            {
-                using var p = System.Diagnostics.Process.GetProcessById(t.Pid);
-                p.Kill();
-                ProcessRegistry.Forget(t.Pid);
-                killed++;
-            }
-            catch { }
-        }
-        await WriteJsonAsync(ctx, 200, new { ok = true, closed = killed });
+        int closed = await Task.Run(() => InstanceControlService.CloseFor(acc.UserId));
+        await WriteJsonAsync(ctx, 200, new { ok = true, closed });
     }
 
     private static async Task HandleStatusAsync(HttpListenerContext ctx)
@@ -217,6 +278,7 @@ public static class WebApiService
     {
         var acc = Resolve(ctx.Request.QueryString["account"]);
         if (acc == null) { await WriteJsonAsync(ctx, 404, new { error = "account not found" }); return; }
+        AuditLogService.Log(AuditLogService.Category.Cookie, $"Local API: cookie read for {acc.Username} (userId {acc.UserId})");
         await WriteJsonAsync(ctx, 200, new { userId = acc.UserId, cookie = acc.Cookie });
     }
 

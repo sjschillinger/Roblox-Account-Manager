@@ -1,0 +1,61 @@
+<UserControl x:Class="RobloxAccountManager.Views.Settings.LaunchingSettings"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:RobloxAccountManager.Controls">
+    <StackPanel>
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Launching}" FontFamily="{StaticResource DisplayFont}" FontSize="18" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}" />
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Launching.Desc}" Style="{StaticResource Text.Caption}" FontSize="13" Margin="0,4,0,22" />
+
+        <TextBlock Text="{DynamicResource Str.Launching.MultiInstance}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.Launching.Multi.Title}" Description="{DynamicResource Str.Launching.Multi.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding EnableMultiInstance}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Launching.Singleton.Title}" Description="{DynamicResource Str.Launching.Singleton.Desc}"
+                                 IsEnabled="{Binding EnableMultiInstance}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding CloseSingletonEvent}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Launching.Adopt.Title}" Description="{DynamicResource Str.Launching.Adopt.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AdoptExternalClients}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Launching.MultiStatus}" Description="{Binding MultiInstanceStatus}">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource Btn.Secondary}" Content="{DynamicResource Str.Launching.Fix}" Command="{Binding FixMultiInstanceCommand}" />
+                        <Button Style="{StaticResource Btn.Secondary}" Margin="8,0,0,0" ctl:Ui.Icon="{StaticResource Icon.Shield}"
+                                Content="{DynamicResource Str.Launching.RunAsAdmin}" Command="{Binding RestartElevatedCommand}"
+                                Visibility="{Binding ShowElevatePrompt, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+
+        <TextBlock Text="{DynamicResource Str.Launching.Joining}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.Launching.Delay.Title}" Description="{DynamicResource Str.Launching.Delay.Desc}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox Style="{StaticResource Input.Number}" Text="{Binding AccountJoinDelay}" />
+                        <TextBlock Text="{DynamicResource Str.Common.Unit.Seconds}" Style="{StaticResource Text.Caption}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Launching.CloseLast.Title}" Description="{DynamicResource Str.Launching.CloseLast.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AutoCloseLastProcess}" />
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+
+        <TextBlock Text="{DynamicResource Str.Launching.SmartJoin}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.Launching.Lowest.Title}" Description="{DynamicResource Str.Launching.Lowest.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding ShuffleLowestServer}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Launching.Pages.Title}" Description="{DynamicResource Str.Launching.Pages.Desc}">
+                    <TextBox Style="{StaticResource Input.Number}" Text="{Binding ShufflePageCount}" />
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+    </StackPanel>
+</UserControl>

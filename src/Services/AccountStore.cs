@@ -9,19 +9,24 @@ namespace RobloxAccountManager.Services;
 
 public class AccountStore
 {
-    private static readonly string StorePath = Paths.InData("accounts.dat");
-    private static readonly string BackupPath = Paths.InData("accounts.bak");
+    private static string StorePath => Paths.InData("accounts.dat");
+    private static string BackupPath => Paths.InData("accounts.bak");
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false };
 
-    // Serialises disk writes: Save() can be triggered from the UI thread and from
-    // WebApiService's background HttpListener callbacks (rotated-cookie persistence) at
-    // the same time; without this two interleaved saves can corrupt the store or backup.
+    // Serialises disk writes: Save() runs on the UI thread and from background callbacks (a cookie
+    // rotated during a launch, the local API) — two interleaved saves could corrupt the store.
     private static readonly object _saveLock = new();
 
     public ObservableCollection<Account> Accounts { get; } = new();
 
     /// <summary>null = no master password (DPAPI mode). Non-null = current master password.</summary>
     public string? MasterPassword { get; private set; }
+
+    /// <summary>Debug demo mode: accounts live in memory only and are never written.</summary>
+    internal bool IsReadOnly { get; set; }
+
+    /// <summary>Raised after a successful save (the Overview refreshes its health panel from it).</summary>
+    public event Action? Saved;
 
     public bool IsPasswordProtected
     {
@@ -33,12 +38,13 @@ public class AccountStore
         }
     }
 
+    public bool StoreExists => File.Exists(StorePath);
+
     // ---------------------------------------------------------------
     //  Persistence
     // ---------------------------------------------------------------
-    public bool StoreExists => File.Exists(StorePath);
 
-    /// <summary>Loads accounts. Returns false if a (wrong/missing) password blocked decryption.</summary>
+    /// <summary>Loads accounts. Returns false if a (wrong/missing) password or a foreign DPAPI key blocked decryption.</summary>
     public bool Load(string? password)
     {
         Accounts.Clear();
@@ -52,23 +58,32 @@ public class AccountStore
 
             string json = Encoding.UTF8.GetString(plain);
             var list = JsonSerializer.Deserialize<List<Persisted>>(json) ?? new();
-            foreach (var p in list) Accounts.Add(p.ToAccount());
+            int unreadable = 0;
+            foreach (var p in list)
+            {
+                var acc = p.ToAccount();
+                if (acc.UnreadableCookie != null) unreadable++;
+                Accounts.Add(acc);
+            }
+            if (unreadable > 0)
+                DiagnosticsService.Warn("store", $"{unreadable} account cookie(s) could not be decrypted for this Windows user; they are kept untouched");
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsService.Warn("store", "Account store could not be opened", ex);
             return false;
         }
     }
 
     public void Save()
     {
+        if (IsReadOnly) return;
         try
         {
-            // The cookie is DPAPI-encrypted per account, so it is NEVER written as plain text —
-            // not even inside the (already encrypted) store JSON. Snapshot + serialise up front
-            // so the (potentially expensive) crypto happens before we hold the write lock.
-            var dtos = Accounts.Select(Persisted.FromAccount).ToList();
+            // Each cookie is DPAPI-wrapped on its own, so it is never plain text — not even inside the
+            // (already encrypted) store JSON. Serialise before taking the lock; the crypto is the slow part.
+            var dtos = Accounts.ToArray().Select(Persisted.FromAccount).ToList();
             string json = JsonSerializer.Serialize(dtos, JsonOpts);
             byte[] plain = Encoding.UTF8.GetBytes(json);
             byte[] encrypted = MasterPassword is { Length: > 0 }
@@ -81,8 +96,7 @@ public class AccountStore
                 if (File.Exists(StorePath))
                     File.Copy(StorePath, BackupPath, overwrite: true);
 
-                // Atomic write: stage to a temp file, then swap it into place so a crash or
-                // power-loss mid-write can never leave a truncated/corrupt accounts.dat.
+                // Atomic write: stage, then swap, so a crash mid-write can never truncate accounts.dat.
                 string tmp = StorePath + ".tmp";
                 File.WriteAllBytes(tmp, encrypted);
                 if (File.Exists(StorePath))
@@ -90,11 +104,15 @@ public class AccountStore
                 else
                     File.Move(tmp, StorePath);
             }
+            try { Saved?.Invoke(); } catch { }
         }
-        catch { /* best-effort; backup remains */ }
+        catch (Exception ex)
+        {
+            DiagnosticsService.Error("store", "Accounts could not be saved", ex);
+        }
     }
 
-    /// <summary>On-disk shape. Cookie is stored DPAPI-protected (enc1:…), never raw.</summary>
+    /// <summary>On-disk shape. Cookie and 2FA secret are stored DPAPI-protected (enc1:…), never raw.</summary>
     private class Persisted
     {
         public string Cookie { get; set; } = "";
@@ -107,15 +125,23 @@ public class AccountStore
         public DateTime LastUse { get; set; }
         public string Alias { get; set; } = "";
         public string Description { get; set; } = "";
-        public string TotpSecret { get; set; } = "";       // DPAPI-protected, like Cookie
+        public string TotpSecret { get; set; } = "";
         public string ProxyUrl { get; set; } = "";
         public string FFlags { get; set; } = "";
         public bool AutoRejoin { get; set; }
         public bool IsFavorite { get; set; }
+        public string Color { get; set; } = "";
+        public DateTime? AddedUtc { get; set; }
+        public DateTime? CookieUpdatedUtc { get; set; }
+        public DateTime? LastValidatedUtc { get; set; }
+        public DateTime? CookieRejectedUtc { get; set; }
 
         public static Persisted FromAccount(Account a) => new()
         {
-            Cookie = Crypto.ProtectString(a.Cookie),
+            // A value this Windows user cannot decrypt is written back exactly as it was read, so
+            // opening the store on the wrong account never destroys the real cookie.
+            Cookie = a.UnreadableCookie ?? Crypto.ProtectString(a.Cookie),
+            TotpSecret = a.UnreadableTotp ?? Crypto.ProtectString(a.TotpSecret),
             UserId = a.UserId,
             Username = a.Username,
             DisplayName = a.DisplayName,
@@ -125,31 +151,49 @@ public class AccountStore
             LastUse = a.LastUse,
             Alias = a.Alias,
             Description = a.Description,
-            TotpSecret = Crypto.ProtectString(a.TotpSecret),
             ProxyUrl = a.ProxyUrl,
             FFlags = a.FFlags,
             AutoRejoin = a.AutoRejoin,
-            IsFavorite = a.IsFavorite
+            IsFavorite = a.IsFavorite,
+            Color = a.Color,
+            AddedUtc = a.AddedUtc,
+            CookieUpdatedUtc = a.CookieUpdatedUtc,
+            LastValidatedUtc = a.LastValidatedUtc,
+            CookieRejectedUtc = a.CookieRejectedUtc,
         };
 
-        public Account ToAccount() => new()
+        public Account ToAccount()
         {
-            Cookie = Crypto.UnprotectString(Cookie),
-            UserId = UserId,
-            Username = Username,
-            DisplayName = DisplayName,
-            Group = string.IsNullOrWhiteSpace(Group) ? "Default" : Group,
-            BrowserTrackerId = BrowserTrackerId,
-            Fields = Fields ?? new(),
-            LastUse = LastUse,
-            Alias = Alias,
-            Description = Description,
-            TotpSecret = Crypto.UnprotectString(TotpSecret),
-            ProxyUrl = ProxyUrl ?? "",
-            FFlags = FFlags ?? "",
-            AutoRejoin = AutoRejoin,
-            IsFavorite = IsFavorite
-        };
+            var acc = new Account
+            {
+                UserId = UserId,
+                Username = Username,
+                DisplayName = DisplayName,
+                Group = string.IsNullOrWhiteSpace(Group) ? "Default" : Group,
+                BrowserTrackerId = BrowserTrackerId,
+                Fields = Fields ?? new(),
+                LastUse = LastUse,
+                Alias = Alias,
+                Description = Description,
+                ProxyUrl = ProxyUrl ?? "",
+                FFlags = FFlags ?? "",
+                AutoRejoin = AutoRejoin,
+                IsFavorite = IsFavorite,
+                Color = Color ?? "",
+                AddedUtc = AddedUtc,
+                CookieUpdatedUtc = CookieUpdatedUtc,
+                LastValidatedUtc = LastValidatedUtc,
+                CookieRejectedUtc = CookieRejectedUtc,
+            };
+
+            if (Crypto.TryUnprotectString(Cookie, out var cookie)) acc.Cookie = cookie;
+            else acc.UnreadableCookie = Cookie;
+
+            if (Crypto.TryUnprotectString(TotpSecret, out var totp)) acc.TotpSecret = totp;
+            else acc.UnreadableTotp = TotpSecret;
+
+            return acc;
+        }
     }
 
     public void SetMasterPassword(string? password)
@@ -157,6 +201,10 @@ public class AccountStore
         MasterPassword = string.IsNullOrEmpty(password) ? null : password;
         Save();
     }
+
+    /// <summary>Constant-time check used by the lock screen.</summary>
+    public bool VerifyMasterPassword(string? candidate)
+        => MasterPassword is { Length: > 0 } && Crypto.SecretEquals(candidate, MasterPassword);
 
     // ---------------------------------------------------------------
     //  Add / import
@@ -167,33 +215,40 @@ public class AccountStore
     {
         string cookie = ExtractCookie(rawCookie);
         if (string.IsNullOrWhiteSpace(cookie))
-            return new(false, "That doesn't look like a valid .ROBLOSECURITY cookie.", null);
+            return new(false, L.T("Add.Cookie.NotACookie"), null);
 
-        var identity = await RobloxApi.GetAuthenticatedUserAsync(cookie);
+        var (identity, rejected) = await RobloxApi.GetAuthenticatedUserDetailedAsync(cookie);
         if (identity == null)
-            return new(false, "Cookie rejected by Roblox — it may be expired or invalid.", null);
+            return new(false, rejected ? L.T("Add.Cookie.Rejected") : L.T("Add.Cookie.Unreachable"), null);
 
         var existing = Accounts.FirstOrDefault(a => a.UserId == identity.Id);
         if (existing != null)
         {
-            existing.Cookie = cookie;      // refresh the token on a known account
-            existing.IsValid = true;
+            existing.ReplaceCookie(cookie);
+            existing.UnreadableCookie = null;
+            existing.MarkValidated(true);
+            if (string.IsNullOrEmpty(existing.Username)) existing.Username = identity.Name;
             Save();
-            return new(false, $"{identity.Name} is already in your list — its cookie was refreshed.", existing);
+            AuditLogService.Log(AuditLogService.Category.Cookie, $"Cookie refreshed for {identity.Name} (userId {identity.Id})");
+            return new(false, L.T("Add.Cookie.Refreshed", identity.Name), existing);
         }
 
+        var now = DateTime.UtcNow;
         var acc = new Account
         {
             Cookie = cookie,
             UserId = identity.Id,
             Username = identity.Name,
             DisplayName = identity.DisplayName,
-            IsValid = true,
-            LastUse = DateTime.Now
+            LastUse = DateTime.Now,
+            AddedUtc = now,
+            CookieUpdatedUtc = now,
+            LastValidatedUtc = now,
         };
         Accounts.Add(acc);
         Save();
-        return new(true, $"Added {identity.Name}.", acc);
+        AuditLogService.Log(AuditLogService.Category.Account, $"Account added: {identity.Name} (userId {identity.Id})");
+        return new(true, L.T("Add.Cookie.Added", identity.Name), acc);
     }
 
     /// <summary>Bulk import: pull every cookie out of arbitrary pasted text and add each.</summary>
@@ -203,7 +258,7 @@ public class AccountStore
         int added = 0, failed = 0;
         foreach (var c in cookies)
         {
-            progress?.Invoke($"Validating… ({added + failed + 1}/{cookies.Count})");
+            progress?.Invoke(L.T("Import.Progress", added + failed + 1, cookies.Count));
             var r = await AddByCookieAsync(c);
             if (r.Success) added++; else failed++;
         }
@@ -214,10 +269,40 @@ public class AccountStore
     {
         Accounts.Remove(account);
         Save();
+        AuditLogService.Log(AuditLogService.Category.Account, $"Account removed: {account.Username} (userId {account.UserId})");
     }
 
     public IEnumerable<string> Groups =>
-        Accounts.Select(a => a.Group).Where(g => !string.IsNullOrWhiteSpace(g)).Distinct().OrderBy(g => g);
+        Accounts.Select(a => a.Group).Where(g => !string.IsNullOrWhiteSpace(g)).Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(g => g, StringComparer.CurrentCultureIgnoreCase);
+
+    /// <summary>Moves every account of one group into another (rename or merge). Returns how many moved.</summary>
+    public int RenameGroup(string from, string to)
+    {
+        to = string.IsNullOrWhiteSpace(to) ? "Default" : to.Trim();
+        int n = 0;
+        foreach (var a in Accounts.Where(a => string.Equals(a.Group, from, StringComparison.OrdinalIgnoreCase)).ToList())
+        {
+            a.Group = to;
+            n++;
+        }
+        if (n > 0) Save();
+        return n;
+    }
+
+    /// <summary>Proxy configured for the account that owns this cookie, if any (per-account proxy routing).</summary>
+    public string? ProxyForCookie(string cookie)
+    {
+        if (string.IsNullOrEmpty(cookie)) return null;
+        try
+        {
+            foreach (var a in Accounts.ToArray())
+                if (a.Cookie == cookie)
+                    return string.IsNullOrWhiteSpace(a.ProxyUrl) ? null : a.ProxyUrl;
+        }
+        catch { /* collection changed mid-read on the UI thread — fall back to the global proxy */ }
+        return null;
+    }
 
     // ---------------------------------------------------------------
     //  Live refresh
@@ -228,7 +313,6 @@ public class AccountStore
         var accounts = (subset ?? Accounts).ToList();
         if (accounts.Count == 0) return;
 
-        // Thumbnails (single batched call, no auth needed)
         if (settings.ShowThumbnails)
         {
             var shots = await RobloxApi.GetHeadshotsAsync(accounts.Select(a => a.UserId));
@@ -236,56 +320,48 @@ public class AccountStore
                 if (shots.TryGetValue(a.UserId, out var url)) a.ThumbnailUrl = url;
         }
 
-        // Presence (one authed call using any valid account's cookie)
         if (settings.ShowPresence)
-        {
-            var authCookie = accounts.FirstOrDefault(a => a.IsValid)?.Cookie;
-            if (authCookie != null)
-            {
-                var pres = await RobloxApi.GetPresencesAsync(authCookie, accounts.Select(a => a.UserId));
-                foreach (var a in accounts)
-                    a.Presence = pres.TryGetValue(a.UserId, out var p) ? p : "Offline";
-            }
-        }
+            await ApplyPresenceAsync(accounts);
 
-        // Robux (per account). Accounts whose cookie Roblox already rejected are skipped —
-        // the call can only fail for them, and on a list with a few dead cookies that was a
-        // wasted round-trip each, every refresh. The economy pass below always did this.
-        if (settings.ShowRobux)
+        // Robux, RAP and Premium are per-account calls. A few in parallel keeps a large list quick
+        // without tripping Roblox's rate limit; accounts whose cookie was rejected are skipped —
+        // those calls can only fail.
+        var live = accounts.Where(a => a.IsValid && !string.IsNullOrEmpty(a.Cookie)).ToList();
+        using var gate = new SemaphoreSlim(3);
+        await Task.WhenAll(live.Select(async a =>
         {
-            foreach (var a in accounts)
+            await gate.WaitAsync();
+            try
             {
-                if (!a.IsValid) continue;
-                long rbx = await RobloxApi.GetRobuxAsync(a.Cookie);
-                if (rbx >= 0) a.Robux = rbx;
+                if (settings.ShowRobux)
+                {
+                    long rbx = await RobloxApi.GetRobuxAsync(a.Cookie);
+                    if (rbx >= 0) a.Robux = rbx;
+                }
+                if (settings.TrackEconomy)
+                {
+                    var (rap, _) = await RobloxApi.GetCollectiblesRapAsync(a.Cookie, a.UserId);
+                    if (rap >= 0) a.Rap = rap;
+                    a.IsPremium = await RobloxApi.GetPremiumAsync(a.Cookie, a.UserId);
+                }
             }
-        }
-
-        // Economy: collectible RAP + premium membership (heavier, one pass per account).
-        if (settings.TrackEconomy)
-        {
-            foreach (var a in accounts)
-            {
-                if (!a.IsValid) continue;
-                var (rap, _) = await RobloxApi.GetCollectiblesRapAsync(a.Cookie, a.UserId);
-                if (rap >= 0) a.Rap = rap;
-                a.IsPremium = await RobloxApi.GetPremiumAsync(a.Cookie, a.UserId);
-            }
-        }
+            catch (Exception ex) { DiagnosticsService.Warn("store", $"Live data refresh failed for {a.Username}", ex); }
+            finally { gate.Release(); }
+        }));
     }
 
-    /// <summary>
-    /// Lightweight presence-only refresh for the live dashboard timer. Skips the
-    /// thumbnail and robux calls so it can run on a short cadence without hammering
-    /// the economy endpoint; a single authed presence call covers every account.
-    /// </summary>
-    public async Task RefreshPresenceOnlyAsync()
+    /// <summary>Presence-only refresh for the live timer: one authenticated batch call per 50 accounts.</summary>
+    public Task RefreshPresenceOnlyAsync() => ApplyPresenceAsync(Accounts.ToList());
+
+    private static async Task ApplyPresenceAsync(List<Account> accounts)
     {
-        var accounts = Accounts.ToList();
         if (accounts.Count == 0) return;
-        var authCookie = accounts.FirstOrDefault(a => a.IsValid)?.Cookie;
+        var authCookie = accounts.FirstOrDefault(a => a.IsValid && !string.IsNullOrEmpty(a.Cookie))?.Cookie;
         if (authCookie == null) return;
+
         var pres = await RobloxApi.GetPresenceDetailsAsync(authCookie, accounts.Select(a => a.UserId));
+        if (pres.Count == 0) return;   // request failed — keep the last known state instead of flashing "offline"
+
         foreach (var a in accounts)
         {
             if (pres.TryGetValue(a.UserId, out var p))
@@ -293,44 +369,51 @@ public class AccountStore
                 a.Presence = p.Status;
                 a.PlaceId = p.PlaceId;
                 a.RootPlaceId = p.RootPlaceId;
+                a.GameId = p.JobId;
+                a.LastLocation = p.Status == PresenceStatus.InGame ? p.LastLocation : "";
             }
             else
             {
-                a.Presence = "Offline";
+                a.Presence = PresenceStatus.Offline;
                 a.PlaceId = 0;
                 a.RootPlaceId = 0;
+                a.GameId = null;
+                a.LastLocation = "";
             }
         }
     }
 
     public async Task RefreshIdentityAsync(Account acc)
     {
-        var id = await RobloxApi.GetAuthenticatedUserAsync(acc.Cookie);
+        var (id, rejected) = await RobloxApi.GetAuthenticatedUserDetailedAsync(acc.Cookie);
         if (id != null)
         {
             acc.UserId = id.Id;
             acc.Username = id.Name;
             acc.DisplayName = id.DisplayName;
-            acc.IsValid = true;
-            acc.RaiseIdentityChanged();
+            acc.MarkValidated(true);
             Save();
         }
-        else acc.IsValid = false;
+        else if (rejected)
+        {
+            acc.MarkValidated(false);
+            Save();
+        }
     }
 
     // ---------------------------------------------------------------
     //  Cookie extraction
     // ---------------------------------------------------------------
     private static readonly Regex CookieRegex =
-        new(@"_\|WARNING:-DO-NOT-SHARE-THIS\.[^""'\s]+", RegexOptions.Compiled);
+        new(@"_\|WARNING:-DO-NOT-SHARE-THIS\.[^""'\s;,]+", RegexOptions.Compiled);
 
-    private static string ExtractCookie(string raw)
+    internal static string ExtractCookie(string raw)
     {
-        raw = raw.Trim();
+        raw = (raw ?? "").Trim();
         var m = CookieRegex.Match(raw);
         if (m.Success) return m.Value;
-        // Allow pasting a bare token (no warning prefix).
-        if (raw.Length > 200 && !raw.Contains(' ') && !raw.Contains('\n')) return raw;
+        // Allow a bare token (no warning prefix) as long as it looks like one.
+        if (raw.Length > 200 && !raw.Any(char.IsWhiteSpace)) return raw;
         return "";
     }
 

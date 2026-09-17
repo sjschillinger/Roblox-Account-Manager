@@ -17,21 +17,18 @@ public class HotkeyBinding
     public uint Key { get; set; }
     public bool Enabled { get; set; } = false;
 
-    /// <summary>Human label for the action, e.g. "Launch selected".</summary>
+    /// <summary>Localized label for the action, e.g. "Launch selected accounts".</summary>
     [JsonIgnore]
-    public string ActionLabel => ActionLabels.TryGetValue(Action, out var l) ? l : Action;
+    public string ActionLabel => Actions.Contains(Action) ? RobloxAccountManager.Services.L.T("Hotkey.Action." + Action) : Action;
 
     /// <summary>Chord as text, e.g. "Ctrl + Alt + L", or "—" when unset.</summary>
     [JsonIgnore]
     public string ChordText => Format(Modifiers, Key);
 
-    /// <summary>The stable action ids this build knows how to dispatch, with labels.</summary>
-    public static readonly Dictionary<string, string> ActionLabels = new()
+    /// <summary>The stable action ids this build knows how to dispatch (labels: Hotkey.Action.&lt;id&gt;).</summary>
+    public static readonly string[] Actions =
     {
-        ["LaunchSelected"]    = "Launch selected accounts",
-        ["ServerHopSelected"] = "Server-hop selected accounts",
-        ["CloseAllRoblox"]    = "Close all Roblox clients",
-        ["FocusManager"]      = "Bring the manager to the front",
+        "LaunchSelected", "ServerHopSelected", "CloseAllRoblox", "FocusManager", "LockManager",
     };
 
     /// <summary>Formats a modifier bitmask + virtual-key code into a readable chord.</summary>

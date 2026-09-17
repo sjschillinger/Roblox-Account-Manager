@@ -40,14 +40,19 @@ public static class SingleInstanceService
             bool errored = false;
             try
             {
+                // CurrentUserOnly: only processes running as this Windows user can connect, so another
+                // account on a shared PC cannot drive launches through the pipe.
                 using var server = new NamedPipeServerStream(
                     PipeName, PipeDirection.In, 1,
-                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 
                 await server.WaitForConnectionAsync(ct);
 
+                // Bounded read: a forwarded command line is a few hundred bytes, never megabytes.
+                var buffer = new char[8192];
                 using var reader = new StreamReader(server, Encoding.UTF8);
-                string payload = await reader.ReadToEndAsync(ct);
+                int length = await reader.ReadBlockAsync(buffer.AsMemory(), ct);
+                string payload = new string(buffer, 0, length);
 
                 var args = payload.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                                   .Select(a => a.Trim('\r'))
@@ -84,7 +89,7 @@ public static class SingleInstanceService
     {
         try
         {
-            using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
+            using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out, PipeOptions.CurrentUserOnly);
             client.Connect(timeoutMs);
             using var writer = new StreamWriter(client, new UTF8Encoding(false)) { AutoFlush = true };
             writer.Write(string.Join('\n', args));

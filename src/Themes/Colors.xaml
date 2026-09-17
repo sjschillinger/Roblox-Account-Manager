@@ -1,43 +1,73 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- ============ Monochrome "Avallon" palette ============ -->
-    <!-- Near-black canvas with a subtle vertical fade, hairline borders,
-         a light (white) accent for primary actions & toggles. No color. -->
+    <!--
+        Design tokens.
 
-    <Color x:Key="Canvas">#0A0A0C</Color>
-    <Color x:Key="CanvasTop">#111114</Color>
-    <Color x:Key="CanvasBottom">#070709</Color>
-    <Color x:Key="Surface">#0F0F12</Color>
-    <Color x:Key="SurfaceAlt">#151519</Color>
-    <Color x:Key="Elevated">#1A1A1F</Color>
-    <Color x:Key="ElevatedHover">#212127</Color>
-    <Color x:Key="Hairline">#1E1E23</Color>
-    <Color x:Key="HairlineStrong">#2C2C33</Color>
+        These are the dark "Graphite" defaults. ThemeService rewrites every colour and brush below at
+        startup (dark / light / system mode, the chosen accent and any custom overrides), so this file
+        only has to be complete — it is what the self-updater window and the XAML designer render with.
 
-    <Color x:Key="TextPrimary">#F4F4F6</Color>
-    <Color x:Key="TextSecondary">#9C9CA6</Color>
-    <Color x:Key="TextMuted">#5C5C66</Color>
+        Principles the tokens encode:
+          - Chrome (sidebar, title strip) sits a step darker than the content it frames.
+          - Colour carries state, not decoration: presence uses Roblox's own convention (online blue,
+            in-game green, in-Studio orange), health uses success / warning / danger.
+          - The accent is reserved for the primary action, focus and selection.
+    -->
 
-    <!-- Accent is now light/neutral (white-ish) — matches the reference. -->
-    <Color x:Key="Accent">#F2F2F5</Color>
+    <!-- ============ Surfaces ============ -->
+    <Color x:Key="Canvas">#101216</Color>
+    <Color x:Key="Chrome">#0B0C0F</Color>
+    <Color x:Key="Surface">#15171C</Color>
+    <Color x:Key="SurfaceAlt">#1B1E24</Color>
+    <Color x:Key="Elevated">#1E2128</Color>
+    <Color x:Key="HoverOverlay">#0DFFFFFF</Color>
+    <Color x:Key="PressedOverlay">#17FFFFFF</Color>
+    <Color x:Key="Selected">#232733</Color>
+    <Color x:Key="Hairline">#22252C</Color>
+    <Color x:Key="HairlineStrong">#2E323B</Color>
+
+    <!-- ============ Text ============ -->
+    <Color x:Key="TextPrimary">#EDEEF2</Color>
+    <Color x:Key="TextSecondary">#A2A7B2</Color>
+    <Color x:Key="TextMuted">#6C717C</Color>
+
+    <!-- ============ Accent ============ -->
+    <Color x:Key="Accent">#EDEEF2</Color>
     <Color x:Key="AccentHover">#FFFFFF</Color>
-    <Color x:Key="AccentPressed">#DADADE</Color>
-    <Color x:Key="AccentSoft">#1C1C22</Color>
-    <Color x:Key="OnAccent">#0A0A0C</Color>
+    <Color x:Key="AccentPressed">#D2D4DA</Color>
+    <Color x:Key="AccentSoft">#262932</Color>
+    <Color x:Key="OnAccent">#0E0F12</Color>
+    <Color x:Key="Focus">#8A93A6</Color>
 
-    <Color x:Key="Success">#4ADE80</Color>
-    <Color x:Key="Warning">#E3B341</Color>
-    <Color x:Key="Danger">#F87171</Color>
-    <Color x:Key="DangerSoft">#241618</Color>
-    <Color x:Key="Info">#93B4E8</Color>
+    <!-- ============ State ============ -->
+    <Color x:Key="Success">#34C77B</Color>
+    <Color x:Key="SuccessSoft">#1A2E24</Color>
+    <Color x:Key="Warning">#F2A93B</Color>
+    <Color x:Key="WarningSoft">#2F2616</Color>
+    <Color x:Key="Danger">#F0616A</Color>
+    <Color x:Key="DangerSoft">#301B1E</Color>
+    <Color x:Key="Info">#4AA8FF</Color>
+    <Color x:Key="InfoSoft">#172636</Color>
+
+    <!-- Roblox presence convention -->
+    <Color x:Key="PresenceOnline">#3AA0FF</Color>
+    <Color x:Key="PresenceInGame">#2FBF71</Color>
+    <Color x:Key="PresenceStudio">#F5A623</Color>
+    <Color x:Key="PresenceOffline">#5A5F69</Color>
+
+    <Color x:Key="Scrim">#99050608</Color>
+    <Color x:Key="ShadowColor">#000000</Color>
 
     <!-- ============ Brushes ============ -->
     <SolidColorBrush x:Key="CanvasBrush" Color="{StaticResource Canvas}" />
+    <SolidColorBrush x:Key="ChromeBrush" Color="{StaticResource Chrome}" />
     <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource Surface}" />
     <SolidColorBrush x:Key="SurfaceAltBrush" Color="{StaticResource SurfaceAlt}" />
     <SolidColorBrush x:Key="ElevatedBrush" Color="{StaticResource Elevated}" />
-    <SolidColorBrush x:Key="ElevatedHoverBrush" Color="{StaticResource ElevatedHover}" />
+    <SolidColorBrush x:Key="HoverOverlayBrush" Color="{StaticResource HoverOverlay}" />
+    <SolidColorBrush x:Key="PressedOverlayBrush" Color="{StaticResource PressedOverlay}" />
+    <SolidColorBrush x:Key="SelectedBrush" Color="{StaticResource Selected}" />
     <SolidColorBrush x:Key="HairlineBrush" Color="{StaticResource Hairline}" />
     <SolidColorBrush x:Key="HairlineStrongBrush" Color="{StaticResource HairlineStrong}" />
 
@@ -50,48 +80,44 @@
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressed}" />
     <SolidColorBrush x:Key="AccentSoftBrush" Color="{StaticResource AccentSoft}" />
     <SolidColorBrush x:Key="OnAccentBrush" Color="{StaticResource OnAccent}" />
+    <SolidColorBrush x:Key="FocusBrush" Color="{StaticResource Focus}" />
 
     <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource Success}" />
+    <SolidColorBrush x:Key="SuccessSoftBrush" Color="{StaticResource SuccessSoft}" />
     <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource Warning}" />
+    <SolidColorBrush x:Key="WarningSoftBrush" Color="{StaticResource WarningSoft}" />
     <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource Danger}" />
     <SolidColorBrush x:Key="DangerSoftBrush" Color="{StaticResource DangerSoft}" />
     <SolidColorBrush x:Key="InfoBrush" Color="{StaticResource Info}" />
+    <SolidColorBrush x:Key="InfoSoftBrush" Color="{StaticResource InfoSoft}" />
 
-    <!-- Window backdrop: subtle top-to-bottom fade -->
-    <LinearGradientBrush x:Key="WindowBackdropBrush" StartPoint="0.5,0" EndPoint="0.5,1">
-        <GradientStop Color="{StaticResource CanvasTop}" Offset="0" />
-        <GradientStop Color="{StaticResource Canvas}" Offset="0.35" />
-        <GradientStop Color="{StaticResource CanvasBottom}" Offset="1" />
-    </LinearGradientBrush>
+    <SolidColorBrush x:Key="PresenceOnlineBrush" Color="{StaticResource PresenceOnline}" />
+    <SolidColorBrush x:Key="PresenceInGameBrush" Color="{StaticResource PresenceInGame}" />
+    <SolidColorBrush x:Key="PresenceStudioBrush" Color="{StaticResource PresenceStudio}" />
+    <SolidColorBrush x:Key="PresenceOfflineBrush" Color="{StaticResource PresenceOffline}" />
 
-    <!-- Specular highlight across the top edge of the window -->
-    <LinearGradientBrush x:Key="TopSheenBrush" StartPoint="0,0" EndPoint="1,0">
-        <GradientStop Color="#00FFFFFF" Offset="0" />
-        <GradientStop Color="#26FFFFFF" Offset="0.28" />
-        <GradientStop Color="#66FFFFFF" Offset="0.5" />
-        <GradientStop Color="#26FFFFFF" Offset="0.72" />
-        <GradientStop Color="#00FFFFFF" Offset="1" />
-    </LinearGradientBrush>
+    <SolidColorBrush x:Key="ScrimBrush" Color="{StaticResource Scrim}" />
 
-    <!-- Soft glow just under the sheen -->
-    <LinearGradientBrush x:Key="TopGlowBrush" StartPoint="0.5,0" EndPoint="0.5,1">
-        <GradientStop Color="#14FFFFFF" Offset="0" />
-        <GradientStop Color="#00FFFFFF" Offset="1" />
-    </LinearGradientBrush>
-
-    <!-- ============ Type scale ============ -->
+    <!-- ============ Type ============ -->
+    <!-- Body copy stays on the native Windows face: it is hinted for ClearType at 12–14 px, which a
+         bundled font is not. Montserrat — a close relative of the geometric sans Roblox built its
+         brand on — is used for page titles and figures only, where its character shows. -->
     <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI</FontFamily>
-    <FontFamily x:Key="DisplayFont">Segoe UI Variable Display, Segoe UI</FontFamily>
-    <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas, monospace</FontFamily>
+    <FontFamily x:Key="DisplayFont">pack://application:,,,/Assets/Fonts/#Montserrat</FontFamily>
+    <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
 
-    <!-- ============ Radii & metrics ============ -->
-    <CornerRadius x:Key="RadiusSm">7</CornerRadius>
-    <CornerRadius x:Key="RadiusMd">10</CornerRadius>
-    <CornerRadius x:Key="RadiusLg">14</CornerRadius>
-    <CornerRadius x:Key="RadiusXl">18</CornerRadius>
+    <!-- ============ Radii ============ -->
+    <CornerRadius x:Key="RadiusXs">4</CornerRadius>
+    <CornerRadius x:Key="RadiusSm">6</CornerRadius>
+    <CornerRadius x:Key="RadiusMd">8</CornerRadius>
+    <CornerRadius x:Key="RadiusLg">12</CornerRadius>
+    <CornerRadius x:Key="RadiusXl">16</CornerRadius>
     <CornerRadius x:Key="RadiusPill">999</CornerRadius>
 
-    <DropShadowEffect x:Key="ShadowSoft" BlurRadius="34" ShadowDepth="10"
-                      Direction="270" Opacity="0.5" Color="#000000" />
+    <!-- Only floating layers cast a shadow: menus, popovers, dialogs, toasts. -->
+    <DropShadowEffect x:Key="ShadowFloating" BlurRadius="28" ShadowDepth="8" Direction="270"
+                      Opacity="0.38" Color="{StaticResource ShadowColor}" />
+    <DropShadowEffect x:Key="ShadowDialog" BlurRadius="48" ShadowDepth="16" Direction="270"
+                      Opacity="0.45" Color="{StaticResource ShadowColor}" />
 
 </ResourceDictionary>

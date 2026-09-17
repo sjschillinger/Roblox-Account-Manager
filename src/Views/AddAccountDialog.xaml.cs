@@ -2,84 +2,107 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using RobloxAccountManager.Models;
 using RobloxAccountManager.Services;
 
 namespace RobloxAccountManager.Views;
 
 /// <summary>
-/// Adds an account either by signing in with the Roblox username and password — the session
-/// cookie is then fetched automatically — or by pasting a <c>.ROBLOSECURITY</c> cookie directly.
+/// Adds an account in one of three ways:
 ///
-/// Sign-in is the default because finding a cookie by hand means opening browser developer tools,
-/// which is the single step most people get stuck on. The password is handed to
-/// <see cref="RobloxAuthService"/>, which posts it to Roblox and nowhere else; it is held only for
-/// the duration of the dialog and never stored. When Roblox insists on a captcha or device
-/// confirmation, the browser window from <see cref="BrowserService.CaptureLoginCookieAsync"/>
-/// finishes the job instead.
+/// <list type="bullet">
+/// <item><b>Browser</b> (default) — Roblox's own login page opens in a clean, private browser window and
+/// the session cookie is read once the user is signed in. Captchas, two-step verification, passkeys and
+/// whatever Roblox adds next keep working because it is Roblox's real page; the password never passes
+/// through this app.</item>
+/// <item><b>Password</b> — username and password are posted to Roblox's login API. Quick when Roblox does
+/// not ask for a captcha; when it does, the dialog points the user to the browser tab.</item>
+/// <item><b>Cookie</b> — paste a <c>.ROBLOSECURITY</c> value the user already has.</item>
+/// </list>
 /// </summary>
 public partial class AddAccountDialog : Window
 {
-    private enum Mode { SignIn, Cookie }
+    private enum Mode { Browser = 0, Password = 1, Cookie = 2 }
 
     private readonly AccountStore _store;
     private bool _working;
-    private Mode _mode = Mode.SignIn;
+    private Mode _mode;
 
     /// <summary>Set once Roblox asks for a two-step code; the next submit answers it.</summary>
     private RobloxAuthService.TwoStepChallenge? _challenge;
 
-    /// <summary>Non-null while a browser sign-in is running, so Cancel aborts it.</summary>
+    /// <summary>Non-null while a browser sign-in is running, so Cancel stops it.</summary>
     private CancellationTokenSource? _browserCts;
+
+    private Storyboard? _spin;
 
     public Account? Added { get; private set; }
 
-    public AddAccountDialog(AccountStore store)
+    public AddAccountDialog(AccountStore store, int startTab = 0)
     {
         InitializeComponent();
         _store = store;
-        Loaded += (_, _) => UserBox.Focus();
-        KeyDown += (_, e) => { if (e.Key == Key.Escape) Cancel_Click(this, new RoutedEventArgs()); };
+        _mode = Enum.IsDefined(typeof(Mode), startTab) ? (Mode)startTab : Mode.Browser;
+
+        (_mode switch { Mode.Password => PasswordTab, Mode.Cookie => CookieTab, _ => BrowserTab }).IsChecked = true;
+        ApplyMode();
+
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape) { e.Handled = true; Cancel_Click(this, new RoutedEventArgs()); }
+        };
+        Closing += (_, e) =>
+        {
+            // Closing the window mid sign-in stops the browser wait instead of leaving it orphaned.
+            if (_browserCts != null) { try { _browserCts.Cancel(); } catch { } }
+        };
     }
 
     // ---------------------------------------------------------------
     //  Mode switch
     // ---------------------------------------------------------------
 
-    private void SignInTab_Click(object sender, RoutedEventArgs e) => SetMode(Mode.SignIn);
-
-    private void CookieTab_Click(object sender, RoutedEventArgs e) => SetMode(Mode.Cookie);
-
-    private void SetMode(Mode mode)
+    private void Tab_Checked(object sender, RoutedEventArgs e)
     {
-        if (_working || _mode == mode) return;
+        if (!IsInitialized || BrowserPanel == null) return;
+        var mode = sender == PasswordTab ? Mode.Password : sender == CookieTab ? Mode.Cookie : Mode.Browser;
+        if (mode == _mode) return;
         _mode = mode;
+        ApplyMode();
+    }
 
-        bool signIn = mode == Mode.SignIn;
-        SignInTab.Style = (Style)FindResource(signIn ? "PrimaryButton" : "GhostButton");
-        CookieTab.Style = (Style)FindResource(signIn ? "GhostButton" : "PrimaryButton");
+    private void ApplyMode()
+    {
+        BrowserPanel.Visibility = _mode == Mode.Browser ? Visibility.Visible : Visibility.Collapsed;
+        PasswordPanel.Visibility = _mode == Mode.Password ? Visibility.Visible : Visibility.Collapsed;
+        CookiePanel.Visibility = _mode == Mode.Cookie ? Visibility.Visible : Visibility.Collapsed;
 
-        SignInPanel.Visibility = signIn ? Visibility.Visible : Visibility.Collapsed;
-        CookiePanel.Visibility = signIn ? Visibility.Collapsed : Visibility.Visible;
+        // Leaving the password tab abandons any half-finished two-step attempt.
+        if (_mode != Mode.Password) ClearTwoFactor();
 
-        ModeHint.Text = signIn
-            ? "Sign in with the account's Roblox username and password. The session is fetched "
-              + "automatically — you never have to find a cookie yourself."
-            : "Paste the account's .ROBLOSECURITY cookie. It is checked against Roblox before it is added.";
-
-        // Leaving sign-in abandons any half-finished two-step attempt.
-        if (!signIn) ClearTwoFactor();
+        if (_mode == Mode.Browser) ApplyBrowserInfo();
 
         StatusBar.Visibility = Visibility.Collapsed;
         UpdateActionButton();
 
-        if (signIn) UserBox.Focus(); else CookieBox.Focus();
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_mode == Mode.Password) (UserBox.Text.Length == 0 ? (IInputElement)UserBox : PassBox).Focus();
+            else if (_mode == Mode.Cookie) CookieBox.Focus();
+            else ActionBtn.Focus();
+        }), System.Windows.Threading.DispatcherPriority.Input);
     }
 
     private void UpdateActionButton()
-        => AddBtn.Content = _mode == Mode.Cookie ? "Add account"
-                          : _challenge != null ? "Verify"
-                          : "Sign in";
+    {
+        ActionBtn.Content = _mode switch
+        {
+            Mode.Browser => L.T("Add.Action.Browser"),
+            Mode.Cookie => L.T("Add.Action.Cookie"),
+            _ => _challenge != null ? L.T("Add.Action.Verify") : L.T("Add.Action.SignIn"),
+        };
+    }
 
     // ---------------------------------------------------------------
     //  Input
@@ -89,19 +112,14 @@ public partial class AddAccountDialog : Window
     {
         try
         {
-            if (Clipboard.ContainsText())
-            {
-                CookieBox.Text = Clipboard.GetText().Trim();
-                CookieBox.CaretIndex = CookieBox.Text.Length;
-            }
+            if (!Clipboard.ContainsText()) return;
+            CookieBox.Text = Clipboard.GetText().Trim();
+            CookieBox.CaretIndex = CookieBox.Text.Length;
         }
         catch { }
     }
 
-    // Clear any prior error as soon as the user edits.
-    private void Cookie_Changed(object sender, TextChangedEventArgs e) => ClearStatus();
-
-    private void Credentials_Changed(object sender, TextChangedEventArgs e) => ClearStatus();
+    private void Input_Changed(object sender, TextChangedEventArgs e) => ClearStatus();
 
     private void Password_Changed(object sender, RoutedEventArgs e) => ClearStatus();
 
@@ -114,27 +132,36 @@ public partial class AddAccountDialog : Window
     //  Submit
     // ---------------------------------------------------------------
 
-    private async void Add_Click(object sender, RoutedEventArgs e)
+    private async void Action_Click(object sender, RoutedEventArgs e)
     {
         if (_working) return;
-
-        if (_mode == Mode.Cookie) { await AddByCookieAsync(); return; }
-        if (_challenge != null) { await SubmitTwoFactorAsync(); return; }
-
-        await SignInAsync();
+        try
+        {
+            switch (_mode)
+            {
+                case Mode.Browser: await BrowserSignInAsync(); break;
+                case Mode.Cookie: await AddByCookieAsync(); break;
+                default:
+                    if (_challenge != null) await SubmitTwoFactorAsync();
+                    else await SignInAsync();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsService.Error("add-account", "Adding an account failed", ex);
+            SetWorking(false);
+            ShowStatus(L.T("Common.SomethingWentWrong") + " " + ex.Message, Tone.Error);
+        }
     }
 
     private async Task AddByCookieAsync()
     {
         string cookie = CookieBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(cookie))
-        {
-            ShowStatus("Paste a cookie first.", isError: true);
-            return;
-        }
+        if (cookie.Length == 0) { ShowStatus(L.T("Add.Cookie.Empty"), Tone.Error); CookieBox.Focus(); return; }
 
         SetWorking(true);
-        ShowStatus("Validating with Roblox…", isError: false, spinner: true);
+        ShowStatus(L.T("Add.Validating"), Tone.Busy);
         await StoreCookieAsync(cookie);
     }
 
@@ -143,16 +170,13 @@ public partial class AddAccountDialog : Window
         string user = UserBox.Text.Trim();
         string pass = PassBox.Password;
 
-        if (user.Length == 0) { ShowStatus("Enter the Roblox username.", isError: true); UserBox.Focus(); return; }
-        if (pass.Length == 0) { ShowStatus("Enter the password.", isError: true); PassBox.Focus(); return; }
+        if (user.Length == 0) { ShowStatus(L.T("Auth.NeedUsername"), Tone.Error); UserBox.Focus(); return; }
+        if (pass.Length == 0) { ShowStatus(L.T("Auth.NeedPassword"), Tone.Error); PassBox.Focus(); return; }
 
         SetWorking(true);
-        ShowStatus("Signing in to Roblox…", isError: false, spinner: true);
+        ShowStatus(L.T("Add.SigningIn"), Tone.Busy);
 
-        RobloxAuthService.LoginResult result;
-        try { result = await RobloxAuthService.LoginAsync(user, pass); }
-        catch (Exception ex) { SetWorking(false); ShowStatus($"Sign-in failed: {ex.Message}", isError: true); return; }
-
+        var result = await RobloxAuthService.LoginAsync(user, pass);
         await HandleLoginResultAsync(result);
     }
 
@@ -162,53 +186,49 @@ public partial class AddAccountDialog : Window
         if (challenge == null) return;
 
         string code = CodeBox.Text.Trim();
-        if (code.Length == 0) { ShowStatus("Enter the verification code.", isError: true); CodeBox.Focus(); return; }
+        if (code.Length == 0) { ShowStatus(L.T("Auth.NeedCode"), Tone.Error); CodeBox.Focus(); return; }
 
         SetWorking(true);
-        ShowStatus("Checking the code…", isError: false, spinner: true);
+        ShowStatus(L.T("Add.CheckingCode"), Tone.Busy);
 
-        RobloxAuthService.LoginResult result;
-        try { result = await RobloxAuthService.CompleteTwoStepAsync(UserBox.Text.Trim(), PassBox.Password, challenge, code); }
-        catch (Exception ex) { SetWorking(false); ShowStatus($"Verification failed: {ex.Message}", isError: true); return; }
-
+        var result = await RobloxAuthService.CompleteTwoStepAsync(UserBox.Text.Trim(), PassBox.Password, challenge, code);
         await HandleLoginResultAsync(result);
     }
 
     private async Task HandleLoginResultAsync(RobloxAuthService.LoginResult result)
     {
-        // A two-step prompt is news the first time and a rejected code the second time; the
-        // status line should not colour both the same.
+        // A two-step prompt is news the first time and a rejected code the second time.
         bool codeWasRejected = _challenge != null;
 
         switch (result.Outcome)
         {
             case RobloxAuthService.LoginOutcome.Success when result.Cookie != null:
-                ShowStatus("Signed in — adding the account…", isError: false, spinner: true);
+                ShowStatus(L.T("Add.SignedInAdding"), Tone.Busy);
                 await StoreCookieAsync(result.Cookie);
                 return;
 
             case RobloxAuthService.LoginOutcome.TwoStepRequired when result.TwoStep != null:
                 _challenge = result.TwoStep;
                 TwoFactorPanel.Visibility = Visibility.Visible;
-                TwoFactorLabel.Text = $"Verification code from {result.TwoStep.SourceText}";
+                TwoFactorLabel.Text = L.T("Add.CodeFrom", result.TwoStep.SourceText);
                 SetWorking(false);
-                ShowStatus(result.Message, isError: codeWasRejected);
+                ShowStatus(result.Message, codeWasRejected ? Tone.Error : Tone.Info);
                 CodeBox.Focus();
                 CodeBox.SelectAll();
                 return;
 
             case RobloxAuthService.LoginOutcome.ChallengeRequired:
+                // Roblox wants a captcha — only a real browser can show it.
                 ClearTwoFactor();
                 SetWorking(false);
-                ShowStatus(result.Message, isError: true);
+                ShowStatus(L.T("Add.UseBrowserInstead"), Tone.Error);
                 return;
 
             default:
-                // A rejected code leaves the challenge in place so the next code can be tried.
+                // A rejected code keeps the challenge so the next code can be tried.
                 if (result.Outcome != RobloxAuthService.LoginOutcome.TwoStepRequired) ClearTwoFactor();
                 SetWorking(false);
-                UpdateActionButton();
-                ShowStatus(result.Message, isError: true);
+                ShowStatus(result.Message, Tone.Error);
                 return;
         }
     }
@@ -221,68 +241,69 @@ public partial class AddAccountDialog : Window
         if (result.Account != null)
         {
             Added = result.Account;
-            ShowStatus(result.Message, isError: false, success: true);
-            await Task.Delay(650);
-            DialogResult = true;
-            Close();
+            ShowStatus(result.Message, Tone.Success);
+            await Task.Delay(550);
+            if (IsLoaded) DialogResult = true;
             return;
         }
 
         SetWorking(false);
-        UpdateActionButton();
-        ShowStatus(result.Message, isError: true);
+        ShowStatus(result.Message, Tone.Error);
     }
 
     // ---------------------------------------------------------------
     //  Browser sign-in
     // ---------------------------------------------------------------
 
-    private async void BrowserLogin_Click(object sender, RoutedEventArgs e)
+    private async Task BrowserSignInAsync()
     {
-        if (_working) return;
-
-        if (!ChromiumService.IsInstalled)
-        {
-            // The private browser build is a one-time download; without it there is no window
-            // to sign in through.
-            if (!DialogService.ShowChromiumDownload(this) || !ChromiumService.IsInstalled)
-            {
-                ShowStatus("The sign-in browser is not installed, so the browser sign-in cannot start.", isError: true);
-                return;
-            }
-        }
-
-        ClearTwoFactor();
         SetWorking(true);
-        CancelBtn.IsEnabled = true;      // Cancel aborts the capture instead of closing the dialog
-        CancelBtn.Content = "Stop";
-        ShowStatus("Opening the Roblox sign-in page…", isError: false, spinner: true);
+        CancelBtn.IsEnabled = true;          // Cancel stops the wait instead of closing the dialog
+        CancelBtn.Content = L.T("Common.Stop");
+        ShowStatus(L.T("Browser.Login.Opening"), Tone.Busy);
 
         _browserCts = new CancellationTokenSource();
-        var progress = new Progress<string>(text => ShowStatus(text, isError: false, spinner: true));
+        var progress = new Progress<string>(text => { if (_working) ShowStatus(text, Tone.Busy); });
 
         BrowserService.LoginCapture capture;
-        try { capture = await BrowserService.CaptureLoginCookieAsync(progress, _browserCts.Token); }
-        catch (Exception ex) { capture = new BrowserService.LoginCapture(false, $"Browser sign-in failed: {ex.Message}", null); }
+        try
+        {
+            capture = await BrowserService.CaptureLoginCookieAsync(progress, _browserCts.Token);
+
+            // No Edge / Chrome on this PC: offer the private browser once, then try again.
+            if (!capture.Success && capture.NoBrowser)
+            {
+                ShowStatus(L.T("Add.Browser.NeedDownload"), Tone.Info);
+                if (DialogService.ShowChromiumDownload(this) && !_browserCts.IsCancellationRequested)
+                    capture = await BrowserService.CaptureLoginCookieAsync(progress, _browserCts.Token);
+            }
+        }
         finally
         {
-            _browserCts?.Dispose();
+            _browserCts.Dispose();
             _browserCts = null;
-            CancelBtn.Content = "Cancel";
+            CancelBtn.Content = L.T("Common.Cancel");
         }
+
+        if (!IsLoaded) return;
 
         if (capture.Success && capture.Cookie != null)
         {
-            ShowStatus("Signed in — adding the account…", isError: false, spinner: true);
+            Activate();
+            ShowStatus(L.T("Add.SignedInAdding"), Tone.Busy);
             await StoreCookieAsync(capture.Cookie);
             return;
         }
 
         SetWorking(false);
-        UpdateActionButton();
-        ShowStatus(capture.Message == "no-chromium"
-            ? "The sign-in browser is not installed, so the browser sign-in cannot start."
-            : capture.Message, isError: true);
+        ShowStatus(capture.Message, Tone.Error);
+        ApplyBrowserInfo();
+    }
+
+    private void ApplyBrowserInfo()
+    {
+        var browser = BrowserService.Resolve();
+        BrowserInfo.Text = browser != null ? L.T("Add.Browser.Uses", browser.Engine) : L.T("Add.Browser.NoneYet");
     }
 
     private void ClearTwoFactor()
@@ -307,44 +328,73 @@ public partial class AddAccountDialog : Window
 
         if (_working) return;
         DialogResult = false;
-        Close();
+    }
+
+    private void Header_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ButtonState != MouseButtonState.Pressed) return;
+        try { DragMove(); } catch (InvalidOperationException) { }
     }
 
     private void SetWorking(bool working)
     {
         _working = working;
-        AddBtn.IsEnabled = !working;
+        ActionBtn.IsEnabled = !working;
         CancelBtn.IsEnabled = !working;
-        SignInTab.IsEnabled = !working;
+        BrowserTab.IsEnabled = !working;
+        PasswordTab.IsEnabled = !working;
         CookieTab.IsEnabled = !working;
         UserBox.IsEnabled = !working;
         PassBox.IsEnabled = !working;
         CodeBox.IsEnabled = !working;
         CookieBox.IsEnabled = !working;
         PasteBtn.IsEnabled = !working;
-        BrowserBtn.IsEnabled = !working;
-
-        if (working)
-            AddBtn.Content = _mode == Mode.Cookie ? "Adding…" : _challenge != null ? "Verifying…" : "Signing in…";
-        else
-            UpdateActionButton();
+        UpdateActionButton();
     }
 
-    private void ShowStatus(string text, bool isError, bool success = false, bool spinner = false)
+    private enum Tone { Busy, Info, Success, Error }
+
+    private void ShowStatus(string text, Tone tone)
     {
+        if (string.IsNullOrWhiteSpace(text)) { StatusBar.Visibility = Visibility.Collapsed; return; }
+
         StatusBar.Visibility = Visibility.Visible;
         StatusText.Text = text;
 
-        Color accent;
-        if (success) accent = (Color)ColorConverter.ConvertFromString("#3FB950");
-        else if (isError) accent = (Color)ColorConverter.ConvertFromString("#F85149");
-        else accent = (Color)ColorConverter.ConvertFromString("#7B61FF");
+        string fg = tone switch { Tone.Success => "SuccessBrush", Tone.Error => "DangerBrush", _ => "TextPrimaryBrush" };
+        string bg = tone switch { Tone.Success => "SuccessSoftBrush", Tone.Error => "DangerSoftBrush", _ => "SurfaceAltBrush" };
+        string icon = tone switch
+        {
+            Tone.Success => "Icon.CheckCircle",
+            Tone.Error => "Icon.AlertCircle",
+            Tone.Info => "Icon.Info",
+            _ => "Icon.Refresh",
+        };
 
-        StatusText.Foreground = new SolidColorBrush(accent);
-        StatusIcon.Stroke = new SolidColorBrush(accent);
-        StatusBar.Background = new SolidColorBrush(Color.FromArgb(28, accent.R, accent.G, accent.B));
+        StatusText.SetResourceReference(TextBlock.ForegroundProperty, fg);
+        StatusIcon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, tone is Tone.Busy or Tone.Info ? "TextSecondaryBrush" : fg);
+        StatusBar.SetResourceReference(Border.BackgroundProperty, bg);
+        StatusIcon.Data = (Geometry)FindResource(icon);
 
-        string key = success ? "Icon.Check" : isError ? "Icon.Close" : "Icon.Refresh";
-        StatusIcon.Data = (Geometry)FindResource(key);
+        if (tone == Tone.Busy) StartSpin(); else StopSpin();
+    }
+
+    private void StartSpin()
+    {
+        if (_spin != null) return;
+        var anim = new DoubleAnimation(0, 360, TimeSpan.FromSeconds(1.1)) { RepeatBehavior = RepeatBehavior.Forever };
+        Storyboard.SetTarget(anim, StatusIcon);
+        Storyboard.SetTargetProperty(anim, new PropertyPath("RenderTransform.Angle"));
+        _spin = new Storyboard();
+        _spin.Children.Add(anim);
+        _spin.Begin(this, true);
+    }
+
+    private void StopSpin()
+    {
+        if (_spin == null) return;
+        _spin.Stop(this);
+        _spin = null;
+        StatusSpin.Angle = 0;
     }
 }

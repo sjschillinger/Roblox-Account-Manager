@@ -143,7 +143,7 @@ public static class DiagnosticsService
         catch (Exception ex)
         {
             Warn("diagnostics", "could not open the data folder", ex);
-            try { ToastService.Error("Couldn't open the folder", Paths.DataDir); } catch { }
+            try { ToastService.Error(L.T("Diagnostics.OpenFolderFailed"), Paths.DataDir); } catch { }
         }
     }
 

@@ -77,7 +77,7 @@ public static class Ic3w0lfImportService
     public static ReadResult ReadFile(string path)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            return new(false, "", 0, "File not found.");
+            return new(false, "", 0, L.T("Import.Ic3w0lf.NotFound"));
 
         byte[] bytes;
         try
@@ -86,7 +86,7 @@ public static class Ic3w0lfImportService
         }
         catch (Exception ex)
         {
-            return new(false, "", 0, $"Couldn't read the file: {ex.Message}");
+            return new(false, "", 0, L.T("Import.Ic3w0lf.Unreadable", ex.Message));
         }
 
         // Latin-1 is a total byte→char map: ASCII cookie tokens survive verbatim
@@ -95,12 +95,8 @@ public static class Ic3w0lfImportService
         int count = CookieRegex.Matches(text).Count;
 
         if (count == 0)
-            return new(false, text, 0,
-                "No cookies found in that file. If your ic3w0lf manager uses a master " +
-                "password its account data is encrypted — open ic3w0lf, use its " +
-                "\"Export\" feature to write a plain cookie list, and import that here.");
+            return new(false, text, 0, L.T("Import.Ic3w0lf.NoCookies"));
 
-        return new(true, text, count,
-            $"Found {count} cookie{(count == 1 ? "" : "s")} — validating with Roblox…");
+        return new(true, text, count, L.N("Import.Ic3w0lf.Found", count));
     }
 }

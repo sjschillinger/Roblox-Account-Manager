@@ -1,98 +1,307 @@
-using System;
 using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using System.Linq;
 using System.Windows;
+using System.Windows.Threading;
 using RobloxAccountManager.Models;
 using RobloxAccountManager.Mvvm;
 using RobloxAccountManager.Services;
 
 namespace RobloxAccountManager.ViewModels;
 
+/// <summary>A running Roblox client as shown on the Overview.</summary>
+public sealed class ClientRow
+{
+    public int Pid { get; init; }
+    public Account? Account { get; init; }
+    public string Name { get; init; } = "";
+    public string Detail { get; init; } = "";
+    public string Uptime { get; init; } = "";
+    public string Memory { get; init; } = "";
+    public bool IsExternal { get; init; }
+    public bool HasWindow { get; init; }
+}
+
+/// <summary>A recorded session in the activity list.</summary>
+public sealed class SessionRow
+{
+    public Account? Account { get; init; }
+    public string Name { get; init; } = "";
+    public string Duration { get; init; } = "";
+    public string When { get; init; } = "";
+}
+
 /// <summary>
-/// Always-live view of every account's presence for the dashboard. The list binds
-/// straight through to the shared account collection while the headline counters
-/// (online / in-game / in-studio / offline) are kept in sync with the
-/// <see cref="PresenceService"/> polling loop and any add/remove of accounts.
+/// Backs the Overview page: headline numbers, the running clients with their controls, accounts
+/// that need attention (the session health panel), who is online and recent sessions.
 /// </summary>
 public class DashboardViewModel : ObservableObject
 {
     private readonly AccountStore _store;
+    private readonly MainViewModel _main;
+    private readonly DispatcherTimer _clientTimer;
+    private readonly DispatcherTimer _recompute;
 
-    public DashboardViewModel(AccountStore store)
+    public DashboardViewModel(AccountStore store, MainViewModel main)
     {
         _store = store;
-        RefreshCommand = new AsyncRelayCommand(() => PresenceService.PollNowAsync());
-        PresenceService.PresenceUpdated += OnPresenceUpdated;
-        _store.Accounts.CollectionChanged += OnAccountsChanged;
+        _main = main;
+
+        RefreshCommand = new AsyncRelayCommand(RefreshAsync);
+        ValidateAllCommand = new AsyncRelayCommand(ValidateAllAsync);
+        ArrangeCommand = new RelayCommand(_ => Report(InstanceControlService.ArrangeGrid(), "Clients.Arranged"));
+        MinimizeAllCommand = new RelayCommand(_ => Report(InstanceControlService.MinimizeAll(), "Clients.Minimized"));
+        RestoreAllCommand = new RelayCommand(_ => Report(InstanceControlService.RestoreAll(), "Clients.Restored"));
+        CloseAllCommand = new RelayCommand(_ => CloseAll());
+        FocusClientCommand = new RelayCommand(p => { if (p is int pid && !InstanceControlService.Focus(pid)) _main.SetStatus(L.T("Clients.NoWindow")); });
+        CloseClientCommand = new RelayCommand(p => { if (p is int pid) _ = Task.Run(() => { InstanceControlService.Close(pid); }); });
+        OpenAccountCommand = new RelayCommand(p => { if (p is Account a) _main.ShowAccount(a); });
+        FixAccountCommand = new AsyncRelayCommand(p => FixAsync(p as Account));
+
+        _clientTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _clientTimer.Tick += (_, _) => RefreshClients();
+
+        // Recompute the headline numbers at most a few times a second — a presence poll changes
+        // every account at once.
+        _recompute = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _recompute.Tick += (_, _) => { _recompute.Stop(); Recompute(); };
+
+        PresenceService.PresenceUpdated += QueueRecompute;
+        _store.Accounts.CollectionChanged += (_, e) =>
+        {
+            if (e.NewItems != null) foreach (Account a in e.NewItems) a.PropertyChanged += OnAccountChanged;
+            if (e.OldItems != null) foreach (Account a in e.OldItems) a.PropertyChanged -= OnAccountChanged;
+            QueueRecompute();
+        };
+        _store.Saved += QueueRecompute;
         Recompute();
     }
 
-    /// <summary>The shared, observable account collection — rendered as the live list.</summary>
-    public ObservableCollection<Account> Accounts => _store.Accounts;
-
-    /// <summary>Mirrors Settings.HideUsernames so the live list can mask names (RefreshMask cross-VM pattern).</summary>
-    public bool MaskUsernames => SettingsService.Current.HideUsernames;
-    public void RefreshMask() => OnPropertyChanged(nameof(MaskUsernames));
-
-    private int _total, _online, _inGame, _inStudio, _offline;
-    public int Total    { get => _total;    private set => SetField(ref _total, value); }
-    public int Online   { get => _online;   private set => SetField(ref _online, value); }
-    public int InGame   { get => _inGame;   private set => SetField(ref _inGame, value); }
-    public int InStudio { get => _inStudio; private set => SetField(ref _inStudio, value); }
-    public int Offline  { get => _offline;  private set => SetField(ref _offline, value); }
-
-    private long _totalRobux, _totalRap;
-    private int _premiumCount;
-    public long TotalRobux   { get => _totalRobux;   private set => SetField(ref _totalRobux, value); }
-    public long TotalRap     { get => _totalRap;     private set => SetField(ref _totalRap, value); }
-    public int  PremiumCount { get => _premiumCount; private set => SetField(ref _premiumCount, value); }
-
-    private string _lastUpdated = "never";
-    public string LastUpdated { get => _lastUpdated; private set => SetField(ref _lastUpdated, value); }
-
-    // ---- playtime (#1.7.0) ----
-
-    /// <summary>Combined playtime over the last seven days, e.g. "12h 40m".</summary>
-    public string PlaytimeWeekText => PlaytimeService.Format(PlaytimeService.Last7DaysTotal);
-
-    /// <summary>Combined playtime across the whole recorded history.</summary>
-    public string PlaytimeTotalText => PlaytimeService.Format(PlaytimeService.AllTimeTotal);
-
-    /// <summary>True once anything has been recorded — the tiles read "—" before that.</summary>
-    public bool HasPlaytime => PlaytimeService.AllTimeTotal > TimeSpan.Zero;
-
-    /// <summary>Re-reads the totals after a session was recorded.</summary>
-    public void RefreshPlaytime()
+    private void OnAccountChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        OnPropertyChanged(nameof(PlaytimeWeekText));
-        OnPropertyChanged(nameof(PlaytimeTotalText));
-        OnPropertyChanged(nameof(HasPlaytime));
+        if (e.PropertyName is nameof(Account.Presence) or nameof(Account.Health) or nameof(Account.Robux)
+            or nameof(Account.LastLocation) or nameof(Account.ThumbnailUrl))
+            QueueRecompute();
     }
 
-    public AsyncRelayCommand RefreshCommand { get; }
-
-    private void OnAccountsChanged(object? sender, NotifyCollectionChangedEventArgs e) => OnPresenceUpdated();
-
-    private void OnPresenceUpdated()
+    private void QueueRecompute()
     {
-        // Poll callback arrives on a threadpool thread; marshal count updates to the UI.
         var d = Application.Current?.Dispatcher;
-        if (d != null && !d.CheckAccess()) d.BeginInvoke(new Action(Recompute));
-        else Recompute();
+        if (d == null) return;
+        if (!d.CheckAccess()) { d.BeginInvoke(new Action(QueueRecompute)); return; }
+        _recompute.Stop();
+        _recompute.Start();
     }
+
+    public void OnShown()
+    {
+        RefreshClients();
+        foreach (var a in _store.Accounts) a.RaiseHealth();   // "checked 3 days ago" moves with the clock
+        Recompute();
+        _clientTimer.Start();
+    }
+
+    public void RefreshLocalized()
+    {
+        OnPropertyChanged(string.Empty);
+        Recompute();
+        RefreshClients();
+    }
+
+    // ================================================================ headline numbers
+
+    private int _total, _online, _inGame, _attentionCount;
+    private long _totalRobux;
+    public int Total { get => _total; private set => SetField(ref _total, value); }
+    public int Online { get => _online; private set => SetField(ref _online, value); }
+    public int InGame { get => _inGame; private set => SetField(ref _inGame, value); }
+    public int AttentionCount { get => _attentionCount; private set { if (SetField(ref _attentionCount, value)) OnPropertyChanged(nameof(AllHealthy)); } }
+    public long TotalRobux { get => _totalRobux; private set { if (SetField(ref _totalRobux, value)) OnPropertyChanged(nameof(TotalRobuxText)); } }
+    public string TotalRobuxText => _totalRobux.ToString("N0");
+
+    public string PlaytimeWeekText => PlaytimeService.Format(PlaytimeService.Last7DaysTotal);
+    public string PlaytimeTotalText => PlaytimeService.AllTimeTotal > TimeSpan.Zero
+        ? L.T("Overview.PlaytimeTotal", PlaytimeService.Format(PlaytimeService.AllTimeTotal))
+        : L.T("Playtime.Nothing");
+
+    public string OnlineNote => L.N("Overview.OnlineNote", _total);
+
+    public bool HasAccounts => _total > 0;
+    public bool AllHealthy => _attentionCount == 0;
+
+    public string Subtitle => _total == 0 ? L.T("Overview.Subtitle.Empty") : L.N("Overview.Subtitle", _total, _online);
+
+    public bool MaskUsernames => SettingsService.Current.HideUsernames;
+    public void RefreshMask() { OnPropertyChanged(nameof(MaskUsernames)); Recompute(); RefreshClients(); }
+
+    public ObservableCollection<Account> AttentionAccounts { get; } = new();
+    public ObservableCollection<Account> OnlineAccounts { get; } = new();
+    public ObservableCollection<SessionRow> RecentSessions { get; } = new();
 
     private void Recompute()
     {
         var list = _store.Accounts.ToList();
-        Total    = list.Count;
-        Online   = list.Count(a => a.Presence == "Online");
-        InGame   = list.Count(a => a.Presence == "In Game");
-        InStudio = list.Count(a => a.Presence == "In Studio");
-        Offline  = list.Count - Online - InGame - InStudio;
-        TotalRobux   = list.Where(a => a.Robux > 0).Sum(a => a.Robux);
-        TotalRap     = list.Where(a => a.Rap > 0).Sum(a => a.Rap);
-        PremiumCount = list.Count(a => a.IsPremium);
-        LastUpdated = DateTime.Now.ToString("HH:mm:ss");
+        Total = list.Count;
+        Online = list.Count(a => a.IsOnline);
+        InGame = list.Count(a => a.Presence == PresenceStatus.InGame);
+        TotalRobux = list.Where(a => a.Robux > 0).Sum(a => a.Robux);
+
+        var attention = list.Where(a => a.NeedsAttention)
+            .OrderBy(a => a.Health == "Invalid" ? 0 : 1)
+            .ThenBy(a => a.DisplayNameOrUser, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        AttentionCount = attention.Count;
+        Sync(AttentionAccounts, attention);
+
+        Sync(OnlineAccounts, list.Where(a => a.IsOnline)
+            .OrderBy(a => PresenceStatus.Rank(a.Presence))
+            .ThenBy(a => a.DisplayNameOrUser, StringComparer.CurrentCultureIgnoreCase)
+            .ToList());
+
+        OnPropertyChanged(nameof(HasAccounts));
+        OnPropertyChanged(nameof(Subtitle));
+        OnPropertyChanged(nameof(OnlineNote));
+        RefreshSessions();
+    }
+
+    /// <summary>Brings a collection in line with <paramref name="wanted"/> without clearing it (no flicker).</summary>
+    private static void Sync<T>(ObservableCollection<T> target, IList<T> wanted)
+    {
+        for (int i = target.Count - 1; i >= 0; i--)
+            if (!wanted.Contains(target[i])) target.RemoveAt(i);
+        for (int i = 0; i < wanted.Count; i++)
+        {
+            int at = target.IndexOf(wanted[i]);
+            if (at < 0) target.Insert(i, wanted[i]);
+            else if (at != i) target.Move(at, i);
+        }
+    }
+
+    public void RefreshPlaytime()
+    {
+        OnPropertyChanged(nameof(PlaytimeWeekText));
+        OnPropertyChanged(nameof(PlaytimeTotalText));
+        RefreshSessions();
+    }
+
+    private void RefreshSessions()
+    {
+        var byId = _store.Accounts.Where(a => a.UserId > 0).GroupBy(a => a.UserId).ToDictionary(g => g.Key, g => g.First());
+        RecentSessions.Clear();
+        foreach (var s in PlaytimeService.Recent(6))
+        {
+            byId.TryGetValue(s.UserId, out var acc);
+            RecentSessions.Add(new SessionRow
+            {
+                Account = acc,
+                Name = MaskUsernames ? "••••••" : acc?.DisplayNameOrUser ?? s.UserId.ToString(),
+                Duration = PlaytimeService.Format(s.Duration),
+                When = Account.RelativeTime(DateTimeOffset.FromUnixTimeSeconds(s.EndUnix).UtcDateTime),
+            });
+        }
+        OnPropertyChanged(nameof(HasSessions));
+    }
+
+    public bool HasSessions => RecentSessions.Count > 0;
+
+    // ================================================================ running clients
+
+    public ObservableCollection<ClientRow> Clients { get; } = new();
+    public bool HasClients => Clients.Count > 0;
+
+    public void RefreshClients()
+    {
+        var snapshot = InstanceControlService.Snapshot();
+        var byId = _store.Accounts.Where(a => a.UserId > 0).GroupBy(a => a.UserId).ToDictionary(g => g.Key, g => g.First());
+
+        Clients.Clear();
+        foreach (var c in snapshot)
+        {
+            byId.TryGetValue(c.UserId, out var acc);
+            string name = c.IsExternal ? L.T("Clients.External")
+                        : MaskUsernames ? "••••••"
+                        : acc?.DisplayNameOrUser ?? c.Alias;
+            string detail = acc != null && acc.Presence == PresenceStatus.InGame && acc.LastLocation.Length > 0
+                ? acc.LastLocation
+                : c.PlaceId > 0 ? L.T("Place.Fallback", c.PlaceId) : L.T("Clients.NoPlace");
+            Clients.Add(new ClientRow
+            {
+                Pid = c.Pid,
+                Account = acc,
+                Name = name,
+                Detail = detail,
+                Uptime = c.UptimeText,
+                Memory = c.MemoryText,
+                IsExternal = c.IsExternal,
+                HasWindow = c.HasWindow,
+            });
+        }
+        OnPropertyChanged(nameof(HasClients));
+        OnPropertyChanged(nameof(ClientsTitle));
+    }
+
+    public string ClientsTitle => L.N("Clients.Title", Clients.Count);
+
+    // ================================================================ commands
+
+    public AsyncRelayCommand RefreshCommand { get; }
+    public AsyncRelayCommand ValidateAllCommand { get; }
+    public RelayCommand ArrangeCommand { get; }
+    public RelayCommand MinimizeAllCommand { get; }
+    public RelayCommand RestoreAllCommand { get; }
+    public RelayCommand CloseAllCommand { get; }
+    public RelayCommand FocusClientCommand { get; }
+    public RelayCommand CloseClientCommand { get; }
+    public RelayCommand OpenAccountCommand { get; }
+    public AsyncRelayCommand FixAccountCommand { get; }
+
+    private async Task RefreshAsync()
+    {
+        _main.SetStatus(L.T("Status.Refreshing"));
+        await _store.RefreshLiveDataAsync();
+        RefreshClients();
+        Recompute();
+        _main.SetStatus(L.T("Status.Refreshed"));
+    }
+
+    private async Task ValidateAllAsync()
+    {
+        var accounts = _store.Accounts.ToList();
+        if (accounts.Count == 0) { _main.SetStatus(L.T("Status.NothingToRefresh")); return; }
+        _main.SetStatus(L.T("Health.Checking"));
+        int invalid = await CookieHealthService.ValidateAllAsync(accounts, new Progress<string>(_main.SetStatus));
+        _store.Save();
+        Recompute();
+        string message = invalid == 0 ? L.N("Health.AllValid", accounts.Count) : L.N("Health.SomeInvalid", invalid, accounts.Count);
+        _main.SetStatus(message);
+        if (invalid == 0) ToastService.Success(L.T("Health.DoneTitle"), message);
+        else ToastService.Warning(L.T("Health.DoneTitle"), message);
+    }
+
+    /// <summary>The one-click fix for an attention row: sign in again when expired, otherwise check it now.</summary>
+    private async Task FixAsync(Account? account)
+    {
+        if (account == null) return;
+        if (account.Health == "Invalid")
+        {
+            _main.ShowAccount(account);
+            _main.Accounts.InspectorTab = "Security";
+            return;
+        }
+        await CookieHealthService.ValidateAllAsync(new[] { account });
+        _store.Save();
+        Recompute();
+    }
+
+    private void Report(int affected, string key)
+    {
+        _main.SetStatus(affected > 0 ? L.N(key, affected) : L.T("Clients.NoneOpen"));
+        RefreshClients();
+    }
+
+    private void CloseAll()
+    {
+        if (Clients.Count == 0) { _main.SetStatus(L.T("Status.NoClients")); return; }
+        if (!DialogService.Confirm(L.T("Clients.CloseAll.Title"), L.N("Clients.CloseAll.Body", Clients.Count), L.T("Clients.CloseAll.Action"), danger: true))
+            return;
+        _main.CloseAllClients();
     }
 }

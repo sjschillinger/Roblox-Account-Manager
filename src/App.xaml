@@ -25,6 +25,14 @@
             <mvvm:FillToWidth x:Key="FillToWidth" />
             <mvvm:MaskConverter x:Key="MaskConverter" />
             <mvvm:GroupOnlineCount x:Key="GroupOnlineCount" />
+            <mvvm:EqualsToVis x:Key="EqualsToVis" />
+            <mvvm:EqualsToVis x:Key="NotEqualsToVis" Invert="True" />
+            <mvvm:EqualsToBool x:Key="EqualsToBool" />
+            <mvvm:PresenceToBrush x:Key="PresenceToBrush" />
+            <mvvm:PresenceToText x:Key="PresenceToText" />
+            <mvvm:LocalizeKey x:Key="LocalizeKey" />
+            <mvvm:KeyToBrush x:Key="KeyToBrush" />
+            <mvvm:PositiveToVis x:Key="PositiveToVis" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

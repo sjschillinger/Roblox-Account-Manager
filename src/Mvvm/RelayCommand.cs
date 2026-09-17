@@ -1,4 +1,5 @@
 using System.Windows.Input;
+using RobloxAccountManager.Services;
 
 namespace RobloxAccountManager.Mvvm;
 
@@ -49,14 +50,31 @@ public class AsyncRelayCommand : ICommand
         if (canExecute != null) _canExecute = _ => canExecute();
     }
 
+    public bool IsRunning => _running;
+
     public bool CanExecute(object? parameter) => !_running && (_canExecute?.Invoke(parameter) ?? true);
 
     public async void Execute(object? parameter)
     {
+        if (_running) return;
         _running = true;
         RaiseCanExecuteChanged();
-        try { await _execute(parameter); }
-        finally { _running = false; RaiseCanExecuteChanged(); }
+        try
+        {
+            await _execute(parameter);
+        }
+        catch (Exception ex)
+        {
+            // async void: an exception escaping here would reach the dispatcher as a crash dialog.
+            // Record it and tell the user in one line instead.
+            DiagnosticsService.Error("command", "A command failed", ex);
+            ToastService.Error(L.T("Common.SomethingWentWrong"), ex.Message);
+        }
+        finally
+        {
+            _running = false;
+            RaiseCanExecuteChanged();
+        }
     }
 
     public event EventHandler? CanExecuteChanged

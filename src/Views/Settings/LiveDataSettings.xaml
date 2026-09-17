@@ -1,0 +1,46 @@
+<UserControl x:Class="RobloxAccountManager.Views.Settings.LiveDataSettings"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:RobloxAccountManager.Controls">
+    <StackPanel>
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.LiveData}" FontFamily="{StaticResource DisplayFont}" FontSize="18" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}" />
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.LiveData.Desc}" Style="{StaticResource Text.Caption}" FontSize="13" Margin="0,4,0,22" />
+
+        <TextBlock Text="{DynamicResource Str.LiveData.Section}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.LiveData.Presence.Title}" Description="{DynamicResource Str.LiveData.Presence.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding ShowPresence}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.LiveData.Poll.Title}" Description="{DynamicResource Str.LiveData.Poll.Desc}" IsEnabled="{Binding ShowPresence}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox Style="{StaticResource Input.Number}" Text="{Binding PresencePollSeconds}" />
+                        <TextBlock Text="{DynamicResource Str.Common.Unit.Seconds}" Style="{StaticResource Text.Caption}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.LiveData.Avatars.Title}" Description="{DynamicResource Str.LiveData.Avatars.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding ShowThumbnails}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.LiveData.Robux.Title}" Description="{DynamicResource Str.LiveData.Robux.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding ShowRobux}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.LiveData.Economy.Title}" Description="{DynamicResource Str.LiveData.Economy.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding TrackEconomy}" />
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+
+        <TextBlock Text="{DynamicResource Str.Playtime.Section}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.Playtime.Track.Title}" Description="{DynamicResource Str.Playtime.Track.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding TrackPlaytime}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Playtime.Recorded}" Description="{Binding PlaytimeStatus}">
+                    <Button Style="{StaticResource Btn.Danger}" Content="{DynamicResource Str.Playtime.Clear}" Command="{Binding ClearPlaytimeCommand}" />
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+    </StackPanel>
+</UserControl>

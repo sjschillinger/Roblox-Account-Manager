@@ -213,7 +213,7 @@ public static class UpdateService
             if (!assetName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
 
             string? url = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
-            if (string.IsNullOrEmpty(url)) continue;
+            if (string.IsNullOrEmpty(url) || !IsTrustedDownloadUrl(url)) continue;
 
             long size = asset.TryGetProperty("size", out var sz) && sz.TryGetInt64(out long s) ? s : 0;
             var candidate = (url, size, assetName);
@@ -226,6 +226,18 @@ public static class UpdateService
         }
 
         return fallback;
+    }
+
+    /// <summary>
+    /// Only GitHub may serve an update. The URL comes from GitHub's own API response, so this is
+    /// defence in depth — but it also means a hand-crafted --apply-update command line cannot point
+    /// the updater at an arbitrary server.
+    /// </summary>
+    public static bool IsTrustedDownloadUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return false;
+        return uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -283,7 +295,8 @@ public static class UpdateService
             psi.ArgumentList.Add(string.IsNullOrEmpty(info.Sha256) ? "-" : info.Sha256);
             psi.ArgumentList.Add(s.VerifyUpdateDownload ? "1" : "0");
             psi.ArgumentList.Add(s.KeepUpdateBackup ? "1" : "0");
-            Process.Start(psi);
+            AddAppearanceArguments(psi);
+            using (Process.Start(psi)) { }
             return true;
         }
         catch (Exception ex)
@@ -291,6 +304,19 @@ public static class UpdateService
             Debug.WriteLine($"[UpdateService] Failed to launch updater: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Language, theme mode and accent for the updater window (arguments 10–12, v2.0+). The updater
+    /// copy runs from %TEMP% and cannot read the settings file, so it is told how to look instead.
+    /// Older updaters ignore extra arguments.
+    /// </summary>
+    private static void AddAppearanceArguments(ProcessStartInfo psi)
+    {
+        var s = SettingsService.Current;
+        psi.ArgumentList.Add(LocalizationService.Current);
+        psi.ArgumentList.Add(ThemeService.IsLight ? ThemeService.ModeLight : ThemeService.ModeDark);
+        psi.ArgumentList.Add(s.AccentName);
     }
 
     // ---- rollback -------------------------------------------------------------------------
@@ -362,7 +388,8 @@ public static class UpdateService
             psi.ArgumentList.Add("-");
             psi.ArgumentList.Add("0");
             psi.ArgumentList.Add("0");   // the backup IS the rollback target; don't back it up again
-            Process.Start(psi);
+            AddAppearanceArguments(psi);
+            using (Process.Start(psi)) { }
             return true;
         }
         catch (Exception ex)

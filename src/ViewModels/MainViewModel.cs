@@ -1,24 +1,53 @@
 using System.Collections.ObjectModel;
 using System.Windows;
+using System.Windows.Threading;
+using RobloxAccountManager.Models;
 using RobloxAccountManager.Mvvm;
 using RobloxAccountManager.Services;
 
 namespace RobloxAccountManager.ViewModels;
 
+public static class Pages
+{
+    public const int Overview = 0;
+    public const int Accounts = 1;
+    public const int Friends = 2;
+    public const int Servers = 3;
+    public const int Automation = 4;
+    public const int Settings = 5;
+}
+
 public class NavItem : ObservableObject
 {
-    /// <summary>Localization key (e.g. "Nav.Accounts"); the shown <see cref="Title"/>
-    /// is resolved live so a language switch relabels the rail without a rebuild.</summary>
     public string TitleKey { get; init; } = "";
-    public string Title => LocalizationService.Get(TitleKey, LocalizationService.Current);
+    public string Title => L.T(TitleKey);
     public string IconKey { get; init; } = "";
     public int Index { get; init; }
+    public string Shortcut { get; init; } = "";
 
     private bool _isActive;
     public bool IsActive { get => _isActive; set => SetField(ref _isActive, value); }
 
-    /// <summary>Re-reads <see cref="Title"/> after the active language changed.</summary>
+    private string _badge = "";
+    /// <summary>Small count shown at the trailing edge (e.g. accounts needing attention).</summary>
+    public string Badge { get => _badge; set => SetField(ref _badge, value); }
+
     public void RefreshTitle() => OnPropertyChanged(nameof(Title));
+}
+
+/// <summary>One account group in the sidebar; clicking it filters the Accounts page.</summary>
+public class GroupNavItem : ObservableObject
+{
+    public string Name { get; init; } = "";
+
+    private int _count;
+    public int Count { get => _count; set => SetField(ref _count, value); }
+
+    private int _online;
+    public int Online { get => _online; set => SetField(ref _online, value); }
+
+    private bool _isActive;
+    public bool IsActive { get => _isActive; set => SetField(ref _isActive, value); }
 }
 
 public class MainViewModel : ObservableObject
@@ -29,18 +58,24 @@ public class MainViewModel : ObservableObject
     public SettingsViewModel Settings { get; }
     public DashboardViewModel Dashboard { get; }
     public FriendsViewModel Friends { get; }
+    public AutomationViewModel Automation { get; }
+    public CommandPaletteViewModel Palette { get; }
 
-    /// <summary>In-app toast stack, surfaced by the main-window overlay (#30).</summary>
     public ObservableCollection<ToastItem> Toasts => ToastService.Items;
 
     public ObservableCollection<NavItem> NavItems { get; } = new()
     {
-        new NavItem { TitleKey = "Nav.Dashboard", IconKey = "Icon.Activity", Index = 0 },
-        new NavItem { TitleKey = "Nav.Accounts",  IconKey = "Icon.Accounts", Index = 1 },
-        new NavItem { TitleKey = "Nav.Friends",   IconKey = "Icon.Friends",  Index = 2 },
-        new NavItem { TitleKey = "Nav.Servers",   IconKey = "Icon.Servers",  Index = 3 },
-        new NavItem { TitleKey = "Nav.Settings",  IconKey = "Icon.Settings", Index = 4 },
+        new NavItem { TitleKey = "Nav.Overview",   IconKey = "Icon.Home",       Index = Pages.Overview,   Shortcut = "Ctrl+1" },
+        new NavItem { TitleKey = "Nav.Accounts",   IconKey = "Icon.Accounts",   Index = Pages.Accounts,   Shortcut = "Ctrl+2" },
+        new NavItem { TitleKey = "Nav.Friends",    IconKey = "Icon.Friends",    Index = Pages.Friends,    Shortcut = "Ctrl+3" },
+        new NavItem { TitleKey = "Nav.Servers",    IconKey = "Icon.Servers",    Index = Pages.Servers,    Shortcut = "Ctrl+4" },
+        new NavItem { TitleKey = "Nav.Automation", IconKey = "Icon.Automation", Index = Pages.Automation, Shortcut = "Ctrl+5" },
     };
+
+    public NavItem SettingsNav { get; } = new() { TitleKey = "Nav.Settings", IconKey = "Icon.Settings", Index = Pages.Settings, Shortcut = "Ctrl+," };
+
+    /// <summary>Account groups for the sidebar, kept in step with the store.</summary>
+    public ObservableCollection<GroupNavItem> Groups { get; } = new();
 
     private int _selectedIndex;
     public int SelectedIndex
@@ -48,104 +83,322 @@ public class MainViewModel : ObservableObject
         get => _selectedIndex;
         set
         {
-            if (SetField(ref _selectedIndex, value))
+            if (value < 0 || value > Pages.Settings) return;
+            if (!SetField(ref _selectedIndex, value)) return;
+            foreach (var n in NavItems) n.IsActive = n.Index == value;
+            SettingsNav.IsActive = value == Pages.Settings;
+            if (value != Pages.Accounts) SyncGroupHighlight(null);
+            else SyncGroupHighlight(Accounts.GroupFilter);
+
+            if (value == Pages.Settings) Settings.OnShown();
+            if (value == Pages.Friends) Friends.EnsureLoaded();
+            if (value == Pages.Overview) Dashboard.OnShown();
+            if (value == Pages.Automation) Automation.OnShown();
+            if (value == Pages.Servers)
             {
-                OnPropertyChanged(nameof(SelectedNav));
-                foreach (var n in NavItems) n.IsActive = n.Index == value;
-                if (value == 4) Settings.RefreshChromium();
-                if (value == 2) Friends.EnsureLoaded();
-                // Servers tab (index 3): auto-fill the Place ID from the game currently
-                // targeted on the Accounts tab so the user doesn't retype it.
-                if (value == 3 && string.IsNullOrWhiteSpace(Servers.PlaceIdText)
-                                && !string.IsNullOrWhiteSpace(Accounts.PlaceIdText))
+                if (string.IsNullOrWhiteSpace(Servers.PlaceIdText) && !string.IsNullOrWhiteSpace(Accounts.PlaceIdText))
                     Servers.PlaceIdText = Accounts.PlaceIdText;
+                Servers.OnShown();
             }
         }
     }
 
-    public NavItem SelectedNav => NavItems[_selectedIndex];
+    private string _status = "";
+    public string Status { get => _status; private set => SetField(ref _status, value); }
 
-    private string _status = "Ready";
-    public string Status { get => _status; set => SetField(ref _status, value); }
+    public void SetStatus(string s)
+    {
+        var d = Application.Current?.Dispatcher;
+        if (d != null && !d.CheckAccess()) { d.BeginInvoke(new Action(() => Status = s)); return; }
+        Status = s;
+    }
 
-    /// <summary>Version badge in the title bar, e.g. "v1.1.0" — read from the built assembly.</summary>
     public string AppVersionShort => AppInfo.Short;
 
+    private bool _sidebarCollapsed = SettingsService.Current.SidebarCollapsed;
+    public bool SidebarCollapsed
+    {
+        get => _sidebarCollapsed;
+        set
+        {
+            if (!SetField(ref _sidebarCollapsed, value)) return;
+            SettingsService.Current.SidebarCollapsed = value;
+            SettingsService.Save();
+        }
+    }
+
+    // ---- running clients (status bar + sidebar) ----
+    private int _runningClients;
+    public int RunningClients { get => _runningClients; private set { if (SetField(ref _runningClients, value)) OnPropertyChanged(nameof(RunningText)); } }
+    public string RunningText => L.N("Status.Running", _runningClients);
+
+    // ---- lock ----
+    public bool IsLocked => LockService.IsLocked;
+    public bool CanLock => LockService.CanLock;
+
+    private string _unlockError = "";
+    public string UnlockError { get => _unlockError; private set => SetField(ref _unlockError, value); }
+
+    public bool IsModalOpen => DialogService.IsModalOpen;
+
     public RelayCommand NavCommand { get; }
+    public RelayCommand SelectGroupCommand { get; }
+    public RelayCommand ToggleSidebarCommand { get; }
+    public RelayCommand LockCommand { get; }
+    public RelayCommand UnlockCommand { get; }
+    public RelayCommand OpenPaletteCommand { get; }
+    public RelayCommand CloseAllClientsCommand { get; }
+    public RelayCommand ToggleThemeCommand { get; }
 
     // ---- self-update ----
-    private static bool s_updateCheckStarted; // at most one check per process run
-
+    private static bool s_updateCheckStarted;
     private UpdateInfo? _update;
-    private string? _promptedVersion;                 // last version the modal was shown for
-    private System.Windows.Threading.DispatcherTimer? _updateTimer;
+    private string? _promptedVersion;
+    private DispatcherTimer? _updateTimer;
     public bool UpdateAvailable => _update != null;
 
     private string _updateVersionText = "";
-    public string UpdateVersionText
-    {
-        get => _updateVersionText;
-        private set => SetField(ref _updateVersionText, value);
-    }
+    public string UpdateVersionText { get => _updateVersionText; private set => SetField(ref _updateVersionText, value); }
 
     public RelayCommand UpdateNowCommand { get; }
-
-    /// <summary>Dismisses the offered version for good — no pill, no prompt, until a newer one lands.</summary>
     public RelayCommand SkipUpdateCommand { get; }
+
+    private readonly DispatcherTimer _groupRefresh;
 
     public MainViewModel()
     {
+        Store = new AccountStore();
+        Accounts = new AccountsViewModel(Store, this);
+        Servers = new ServerBrowserViewModel(Store, this);
+        Settings = new SettingsViewModel(this);
+        Dashboard = new DashboardViewModel(Store, this);
+        Friends = new FriendsViewModel(Store, this);
+        Automation = new AutomationViewModel(Store, this);
+        Palette = new CommandPaletteViewModel(this);
+
+        NavItems[0].IsActive = true;
+
         NavCommand = new RelayCommand(p =>
         {
             if (p is int i) SelectedIndex = i;
             else if (p != null && int.TryParse(p.ToString(), out var pi)) SelectedIndex = pi;
         });
-
-        Store = new AccountStore();
-        Accounts = new AccountsViewModel(Store, this);
-        Servers = new ServerBrowserViewModel(Store, this);
-        Settings = new SettingsViewModel(this);
-        Dashboard = new DashboardViewModel(Store);
-        Friends = new FriendsViewModel(Store, this);
-
-        NavItems[0].IsActive = true;
-
-        // A language switch relabels the rail live (Title resolves against the active code).
-        LocalizationService.Changed += () =>
+        SelectGroupCommand = new RelayCommand(p =>
         {
-            foreach (var n in NavItems) n.RefreshTitle();
-            OnPropertyChanged(nameof(SelectedNav));
-        };
+            string? group = p as string;
+            Accounts.GroupFilter = string.IsNullOrEmpty(group) ? null : group;
+            SelectedIndex = Pages.Accounts;
+            SyncGroupHighlight(Accounts.GroupFilter);
+        });
+        ToggleSidebarCommand = new RelayCommand(_ => SidebarCollapsed = !SidebarCollapsed);
+        LockCommand = new RelayCommand(_ =>
+        {
+            if (!LockService.Lock()) SetStatus(L.T("Lock.NeedPassword"));
+        });
+        UnlockCommand = new RelayCommand(p => Unlock(p as System.Windows.Controls.PasswordBox));
+        OpenPaletteCommand = new RelayCommand(_ => Palette.Open());
+        CloseAllClientsCommand = new RelayCommand(_ => CloseAllClients());
+        ToggleThemeCommand = new RelayCommand(_ => Settings.ToggleLightDark());
 
         UpdateNowCommand = new RelayCommand(UpdateNow, () => UpdateAvailable);
         SkipUpdateCommand = new RelayCommand(_ => SkipUpdate(), _ => UpdateAvailable);
 
-        // Fire-and-forget update check on startup, at most once per run; failures are silent.
-        if (!s_updateCheckStarted && SettingsService.Current.CheckUpdatesOnStartup)
+        _status = L.T("Status.Ready");
+
+        // Groups: rebuilt shortly after the account list or an account's group changes, so a bulk
+        // import does not rebuild the sidebar once per account.
+        _groupRefresh = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+        _groupRefresh.Tick += (_, _) => { _groupRefresh.Stop(); RebuildGroups(); };
+        Store.Accounts.CollectionChanged += (_, e) =>
+        {
+            if (e.NewItems != null) foreach (Account a in e.NewItems) a.PropertyChanged += OnAccountPropertyChanged;
+            if (e.OldItems != null) foreach (Account a in e.OldItems) a.PropertyChanged -= OnAccountPropertyChanged;
+            QueueGroupRefresh();
+        };
+
+        LocalizationService.Changed += OnLanguageChanged;
+        LockService.Changed += () =>
+        {
+            UnlockError = "";
+            OnPropertyChanged(nameof(IsLocked));
+            OnPropertyChanged(nameof(CanLock));
+        };
+        DialogService.ModalStateChanged += () => OnPropertyChanged(nameof(IsModalOpen));
+        ProcessRegistry.Changed += OnClientsChanged;
+
+        if (!s_updateCheckStarted && SettingsService.Current.CheckUpdatesOnStartup && !AppInfo.IsDemo)
         {
             s_updateCheckStarted = true;
             _ = CheckForUpdateAsync();
         }
+        if (!AppInfo.IsDemo)
+        {
+            ApplyUpdateSchedule();
+            _ = ShowWhatsNewIfUpdatedAsync();
+        }
 
-        ApplyUpdateSchedule();
-
-        // "What's new" once after every update — the first run of a freshly installed version.
-        _ = ShowWhatsNewIfUpdatedAsync();
-
-        // Playtime history: start recording, then publish the stored totals onto the accounts.
         PlaytimeService.Start();
         PlaytimeService.Changed += OnPlaytimeChanged;
         RefreshPlaytime();
         Store.Accounts.CollectionChanged += (_, _) => RefreshPlaytime();
 
-        // Portable app: the autostart entry has to keep pointing at wherever the exe lives now.
-        StartupService.Reconcile(SettingsService.Current.StartWithWindows);
+        if (!AppInfo.IsDemo) StartupService.Reconcile(SettingsService.Current.StartWithWindows);
     }
 
-    /// <summary>
-    /// (Re)arms the background update poll from the current settings. Called at startup and again
-    /// whenever the Updates settings change, so a new interval takes effect without a restart.
-    /// </summary>
+    // ================================================================ groups
+
+    private void OnAccountPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(Account.Group) or nameof(Account.Presence) or nameof(Account.Health))
+            QueueGroupRefresh();
+    }
+
+    private void QueueGroupRefresh()
+    {
+        var d = Application.Current?.Dispatcher;
+        if (d != null && !d.CheckAccess()) { d.BeginInvoke(new Action(QueueGroupRefresh)); return; }
+        _groupRefresh.Stop();
+        _groupRefresh.Start();
+    }
+
+    private void RebuildGroups()
+    {
+        var accounts = Store.Accounts.ToList();
+        var buckets = accounts.GroupBy(a => a.Group, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key.Equals("Default", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        // Update in place where possible so the sidebar does not flicker on every presence poll.
+        var names = buckets.Select(b => b.Key).ToList();
+        for (int i = Groups.Count - 1; i >= 0; i--)
+            if (!names.Contains(Groups[i].Name, StringComparer.OrdinalIgnoreCase)) Groups.RemoveAt(i);
+
+        for (int i = 0; i < buckets.Count; i++)
+        {
+            var b = buckets[i];
+            var item = Groups.FirstOrDefault(g => g.Name.Equals(b.Key, StringComparison.OrdinalIgnoreCase));
+            if (item == null)
+            {
+                item = new GroupNavItem { Name = b.Key };
+                Groups.Insert(Math.Min(i, Groups.Count), item);
+            }
+            else if (Groups.IndexOf(item) != i)
+            {
+                Groups.Move(Groups.IndexOf(item), i);
+            }
+            item.Count = b.Count();
+            item.Online = b.Count(a => a.IsOnline);
+        }
+
+        // A filter on a group that no longer exists would leave the list mysteriously empty.
+        if (Accounts.GroupFilter != null && !names.Contains(Accounts.GroupFilter, StringComparer.OrdinalIgnoreCase))
+            Accounts.GroupFilter = null;
+        SyncGroupHighlight(SelectedIndex == Pages.Accounts ? Accounts.GroupFilter : null);
+
+        int attention = accounts.Count(a => a.NeedsAttention);
+        NavItems[Pages.Overview].Badge = attention > 0 ? attention.ToString() : "";
+        NavItems[Pages.Accounts].Badge = accounts.Count > 0 ? accounts.Count.ToString() : "";
+        OnPropertyChanged(nameof(HasGroups));
+    }
+
+    /// <summary>The group list is only worth showing once there is more than one group.</summary>
+    public bool HasGroups => Groups.Count > 1;
+
+    public void SyncGroupHighlight(string? group)
+    {
+        foreach (var g in Groups)
+            g.IsActive = group != null && g.Name.Equals(group, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ================================================================ clients
+
+    private void OnClientsChanged()
+    {
+        var d = Application.Current?.Dispatcher;
+        if (d == null) return;
+        d.BeginInvoke(new Action(() =>
+        {
+            var all = ProcessRegistry.All;
+            RunningClients = all.Count;
+            foreach (var a in Store.Accounts)
+                a.RunningClients = all.Count(t => t.UserId == a.UserId && !t.IsExternal);
+            Dashboard.RefreshClients();
+        }));
+    }
+
+    public void CloseAllClients()
+    {
+        _ = Task.Run(() =>
+        {
+            int n = InstanceControlService.CloseAll();
+            SetStatus(n > 0 ? L.N("Status.ClosedClients", n) : L.T("Status.NoClients"));
+        });
+    }
+
+    // ================================================================ lock
+
+    /// <summary>Re-reads whether locking is possible (after the master password was set or removed).</summary>
+    public void RaiseLockState()
+    {
+        OnPropertyChanged(nameof(CanLock));
+        OnPropertyChanged(nameof(IsLocked));
+    }
+
+    private void Unlock(System.Windows.Controls.PasswordBox? box)
+    {
+        if (box == null) return;
+        int wait = LockService.RetryDelaySeconds;
+        if (wait > 0) { UnlockError = L.N("Lock.Wait", wait); return; }
+
+        if (LockService.TryUnlock(box.Password))
+        {
+            box.Clear();
+            UnlockError = "";
+        }
+        else
+        {
+            box.Clear();
+            wait = LockService.RetryDelaySeconds;
+            UnlockError = wait > 0 ? L.N("Lock.Wait", wait) : L.T("Lock.Wrong");
+        }
+    }
+
+    // ================================================================ language
+
+    private void OnLanguageChanged()
+    {
+        foreach (var n in NavItems) n.RefreshTitle();
+        SettingsNav.RefreshTitle();
+        foreach (var a in Store.Accounts) a.RaiseLocalized();
+        OnPropertyChanged(string.Empty);
+        Accounts.RefreshLocalized();
+        Dashboard.RefreshLocalized();
+        Friends.RefreshLocalized();
+        Servers.RefreshLocalized();
+        Automation.RefreshLocalized();
+        Settings.RefreshLocalized();
+        RefreshPlaytime();
+    }
+
+    // ================================================================ playtime
+
+    private void OnPlaytimeChanged()
+    {
+        var d = Application.Current?.Dispatcher;
+        if (d != null && !d.CheckAccess()) d.BeginInvoke(new Action(RefreshPlaytime));
+        else RefreshPlaytime();
+    }
+
+    public void RefreshPlaytime()
+    {
+        PlaytimeService.Apply(Store.Accounts);
+        Dashboard.RefreshPlaytime();
+        Settings.RefreshPlaytimeStatus();
+    }
+
+    // ================================================================ updates
+
     public void ApplyUpdateSchedule()
     {
         _updateTimer?.Stop();
@@ -154,82 +407,50 @@ public class MainViewModel : ObservableObject
         var s = SettingsService.Current;
         if (!s.AutoCheckUpdates) return;
 
-        // Floor of 15 minutes. GitHub answers an unauthenticated client 60 times an hour per IP,
-        // and that budget is shared with everything else the app asks it — a tighter poll buys
-        // nothing, because releases are not published minute by minute.
+        // GitHub answers an anonymous client 60 times an hour; releases don't come minute by minute.
         int minutes = Math.Max(15, s.UpdateCheckMinutes);
-
-        _updateTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
+        _updateTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
         _updateTimer.Tick += (_, _) => _ = CheckForUpdateAsync();
         _updateTimer.Start();
     }
 
-    // ---- playtime ----
-    private void OnPlaytimeChanged()
+    private string _updateCheckStatus = "";
+    public string UpdateCheckStatus
     {
-        var d = Application.Current?.Dispatcher;
-        if (d != null && !d.CheckAccess()) d.BeginInvoke(new Action(RefreshPlaytime));
-        else RefreshPlaytime();
+        get => _updateCheckStatus.Length > 0 ? _updateCheckStatus : L.T("Updates.NotChecked");
+        private set => SetField(ref _updateCheckStatus, value);
     }
-
-    /// <summary>Pushes the recorded totals onto the account objects the lists bind to.</summary>
-    public void RefreshPlaytime()
-    {
-        PlaytimeService.Apply(Store.Accounts);
-        Dashboard.RefreshPlaytime();
-        Settings.RefreshPlaytimeStatus();
-    }
-
-    public void SetStatus(string s) => Status = s;
-
-    // ---- update-check status, surfaced on the Settings page ----
-
-    private string _updateCheckStatus = "Not checked yet this session.";
-    /// <summary>Plain-language result of the last update check, for the Settings → About card.</summary>
-    public string UpdateCheckStatus { get => _updateCheckStatus; private set => SetField(ref _updateCheckStatus, value); }
 
     private bool _updateCheckRunning;
     public bool UpdateCheckRunning { get => _updateCheckRunning; private set => SetField(ref _updateCheckRunning, value); }
 
-    /// <summary>
-    /// Manual "check for updates". Unlike the background poll this always reports an outcome —
-    /// including "you are up to date" and "the check failed", so the button never looks like it
-    /// did nothing.
-    /// </summary>
+    /// <summary>Manual check: always reports an outcome, including "up to date" and "failed".</summary>
     public async Task CheckForUpdateNowAsync()
     {
         if (UpdateCheckRunning) return;
         UpdateCheckRunning = true;
-        UpdateCheckStatus = "Checking GitHub…";
-        SetStatus("Checking for updates…");
+        UpdateCheckStatus = L.T("Updates.Checking");
+        SetStatus(L.T("Updates.Checking"));
         try
         {
-            // No ConfigureAwait(false) anywhere in here on purpose: the command is invoked on the
-            // UI thread, so every continuation below resumes there and can touch bindings and
-            // show a modal directly.
-            // ignoreSkip: pressing the button IS the user asking about the version they skipped.
             var info = await UpdateService.CheckForUpdateAsync(ignoreSkip: true);
+            string stamp = DateTime.Now.ToString("t");
 
-            string stamp = DateTime.Now.ToString("HH:mm");
-
-            // A spent API budget answers every request identically to "nothing new", which would
-            // otherwise be reported as "you're up to date" — a claim we cannot actually make.
             if (info == null && UpdateService.IsRateLimited)
             {
-                string until = UpdateService.RateLimitResetsAt?.ToString("HH:mm") ?? "shortly";
-                UpdateCheckStatus = $"GitHub's hourly request limit is used up — checking again after {until}.";
-                SetStatus("Update check postponed — GitHub rate limit reached.");
+                string until = UpdateService.RateLimitResetsAt?.ToString("t") ?? "";
+                UpdateCheckStatus = L.T("Updates.RateLimited", until);
+                SetStatus(L.T("Updates.RateLimitedShort"));
                 return;
             }
 
             if (info == null)
             {
-                UpdateCheckStatus = $"You're on the latest version ({AppInfo.Short}). Last checked {stamp}.";
-                SetStatus($"No update available — {AppInfo.Short} is current.");
+                UpdateCheckStatus = L.T("Updates.UpToDate", AppInfo.Short, stamp);
+                SetStatus(L.T("Updates.UpToDateShort", AppInfo.Short));
                 return;
             }
 
-            // The user asked explicitly, so an earlier "skip" no longer applies to this version.
             if (SettingsService.Current.SkippedUpdateVersion == info.VersionText)
             {
                 SettingsService.Current.SkippedUpdateVersion = "";
@@ -237,36 +458,28 @@ public class MainViewModel : ObservableObject
             }
 
             Adopt(info);
-            UpdateCheckStatus = $"{info.VersionText} is available ({info.SizeText}). Last checked {stamp}.";
-            SetStatus($"Update available — {info.VersionText}.");
+            UpdateCheckStatus = L.T("Updates.AvailableAt", info.VersionText, stamp);
+            SetStatus(L.T("Updates.AvailableShort", info.VersionText));
             _promptedVersion = info.VersionText;
             PromptForUpdate(info);
         }
         catch (Exception ex)
         {
-            UpdateCheckStatus = $"Check failed: {ex.Message}";
-            SetStatus("Update check failed — check your connection and try again.");
+            UpdateCheckStatus = L.T("Updates.Failed", ex.Message);
+            SetStatus(L.T("Updates.FailedShort"));
         }
         finally { UpdateCheckRunning = false; }
     }
 
-    /// <summary>Records a discovered update and lights up the title-bar pill.</summary>
     private void Adopt(UpdateInfo info)
     {
         _update = info;
-        UpdateVersionText = info.IsPrerelease
-            ? $"Pre-release available — {info.VersionText}"
-            : $"Update available — {info.VersionText}";
+        UpdateVersionText = info.VersionText;
         OnPropertyChanged(nameof(UpdateAvailable));
         UpdateNowCommand.RaiseCanExecuteChanged();
         SkipUpdateCommand.RaiseCanExecuteChanged();
     }
 
-    /// <summary>
-    /// Hides the offered version permanently. Without it the only way to stop being told about a
-    /// release the user does not want is to turn update checks off entirely — and then they miss
-    /// the next one too.
-    /// </summary>
     private void SkipUpdate()
     {
         if (_update is not { } info) return;
@@ -280,8 +493,9 @@ public class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(UpdateAvailable));
         UpdateNowCommand.RaiseCanExecuteChanged();
         SkipUpdateCommand.RaiseCanExecuteChanged();
-        UpdateCheckStatus = $"{info.VersionText} skipped. You'll be told about the release after it.";
-        SetStatus($"{info.VersionText} skipped.");
+        UpdateCheckStatus = L.T("Updates.Skipped", info.VersionText);
+        SetStatus(L.T("Updates.Skipped", info.VersionText));
+        Settings.RefreshUpdates();
     }
 
     private async Task CheckForUpdateAsync()
@@ -289,60 +503,49 @@ public class MainViewModel : ObservableObject
         try
         {
             var info = await UpdateService.CheckForUpdateAsync().ConfigureAwait(false);
-
             var dispatcher = Application.Current?.Dispatcher;
             if (dispatcher == null) return;
 
             if (info == null)
             {
-                // Record the negative result too, so the Settings card can say when we last
-                // looked instead of sitting on "not checked yet" forever.
                 await dispatcher.InvokeAsync(() =>
-                    UpdateCheckStatus = $"You're on the latest version ({AppInfo.Short}). Last checked {DateTime.Now:HH:mm}.");
+                    UpdateCheckStatus = L.T("Updates.UpToDate", AppInfo.Short, DateTime.Now.ToString("t")));
                 return;
             }
 
             await dispatcher.InvokeAsync(() =>
             {
                 Adopt(info);
-                UpdateCheckStatus = $"{info.VersionText} is available ({info.SizeText}). Last checked {DateTime.Now:HH:mm}.";
+                UpdateCheckStatus = L.T("Updates.AvailableAt", info.VersionText, DateTime.Now.ToString("t"));
 
-                // Surface the modal once per discovered version. On every following poll the
-                // pill stays visible but we don't re-prompt, so the recurring check never nags.
-                if (_promptedVersion != info.VersionText)
+                // Prompt once per discovered version; later polls keep the pill but never nag.
+                if (_promptedVersion != info.VersionText && !LockService.IsLocked)
                 {
                     _promptedVersion = info.VersionText;
                     PromptForUpdate(info);
                 }
             });
         }
-        catch
+        catch (Exception ex)
         {
-            // Best-effort background poll: a network/parse failure must not bubble up as an
-            // unobserved task exception every 5 minutes. The pill simply stays as-is.
+            DiagnosticsService.Warn("update", "Background update check failed", ex);
         }
     }
 
-    /// <summary>Re-opens this build's changelog on demand (the post-update window is once-only).</summary>
     public async Task ShowWhatsNewAsync()
     {
         try
         {
             string current = UpdateService.CurrentVersionText;
-            // Invoked from the UI thread; keep the continuation there so the window can be shown.
             var notes = await UpdateService.GetNotesForCurrentVersionAsync();
-
-            var win = new Views.WhatsNewWindow(current, notes?.Notes, notes?.PageUrl);
-            if (Application.Current?.MainWindow is { IsVisible: true } owner) win.Owner = owner;
-            win.ShowDialog();
+            DialogService.ShowModal(new Views.WhatsNewWindow(current, notes?.Notes, notes?.PageUrl));
         }
         catch (Exception ex)
         {
-            SetStatus($"Could not open the changelog: {ex.Message}");
+            SetStatus(L.T("Updates.ChangelogFailed", ex.Message));
         }
     }
 
-    // Triggered by the title-bar update pill.
     private void UpdateNow()
     {
         if (_update is { } info) PromptForUpdate(info);
@@ -351,30 +554,29 @@ public class MainViewModel : ObservableObject
     private void PromptForUpdate(UpdateInfo info)
     {
         var win = new Views.UpdatePromptWindow(info);
-        if (Application.Current?.MainWindow is { IsVisible: true } owner) win.Owner = owner;
-        if (win.ShowDialog() != true)
+        if (DialogService.ShowModal(win) != true)
         {
-            // "Skip this version" retires the offer for good; "Later" keeps the pill.
             if (win.Skipped) SkipUpdate();
             return;
         }
 
         if (UpdateService.BeginUpdate(info))
         {
-            // The prompt already showed this version's notes — flag it so the post-update
-            // "What's new" window doesn't repeat the same changelog after the restart.
+            // The prompt already showed these notes; don't repeat them after the restart.
             SettingsService.Current.UpdateNotesSeenFor = info.VersionText;
             SettingsService.Save();
+            Store.Save();
             Application.Current?.Shutdown();
         }
         else
-            SetStatus("Update could not be started — please try again later.");
+        {
+            SetStatus(L.T("Updates.StartFailed"));
+        }
     }
 
     /// <summary>
-    /// Shows the changelog window exactly once after an update: when the running version
-    /// differs from the last one recorded in settings. Fresh installs only record the
-    /// version silently — there is nothing "new" to announce.
+    /// Shows the changelog once after an update — when the running version differs from the last one
+    /// recorded. A fresh install records the version silently; there is nothing new to announce.
     /// </summary>
     private async Task ShowWhatsNewIfUpdatedAsync()
     {
@@ -383,10 +585,6 @@ public class MainViewModel : ObservableObject
             var s = SettingsService.Current;
             string current = UpdateService.CurrentVersionText;
 
-            // One-shot flag set by the update prompt: its dialog already displayed this
-            // version's release notes right before the download, so showing the same
-            // changelog again here would be a duplicate. A stale flag (aborted/failed
-            // update, current version differs) is simply cleared.
             bool seenInPrompt = s.UpdateNotesSeenFor == current;
             bool flagWasSet = s.UpdateNotesSeenFor.Length > 0;
             if (flagWasSet) s.UpdateNotesSeenFor = "";
@@ -405,23 +603,31 @@ public class MainViewModel : ObservableObject
             var notes = await UpdateService.GetNotesForCurrentVersionAsync().ConfigureAwait(false);
             var dispatcher = Application.Current?.Dispatcher;
             if (dispatcher == null) return;
+            // Give the main window time to appear so the dialog has an owner to centre on.
+            await Task.Delay(800).ConfigureAwait(false);
             await dispatcher.InvokeAsync(() =>
-            {
-                var win = new Views.WhatsNewWindow(current, notes?.Notes, notes?.PageUrl, postUpdate: true);
-                if (Application.Current?.MainWindow is { IsVisible: true } owner) win.Owner = owner;
-                win.ShowDialog();
-            });
+                DialogService.ShowModal(new Views.WhatsNewWindow(current, notes?.Notes, notes?.PageUrl, postUpdate: true)));
         }
-        catch
+        catch (Exception ex)
         {
-            // The changelog must never break startup; worst case the window is skipped.
+            DiagnosticsService.Warn("update", "What's new could not be shown", ex);
         }
     }
 
     public void OpenServersFor(long placeId)
     {
         Servers.PlaceIdText = placeId.ToString();
-        SelectedIndex = 3;
+        SelectedIndex = Pages.Servers;
         _ = Servers.RefreshAsync();
+    }
+
+    /// <summary>Selects an account on the Accounts page (command palette, Overview links).</summary>
+    public void ShowAccount(Account account)
+    {
+        Accounts.GroupFilter = null;
+        Accounts.StatusFilter = "All";
+        Accounts.SearchText = "";
+        SelectedIndex = Pages.Accounts;
+        Accounts.Selected = account;
     }
 }

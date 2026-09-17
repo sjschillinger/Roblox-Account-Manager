@@ -6,10 +6,13 @@ namespace RobloxAccountManager.Services;
 
 public static class SettingsService
 {
-    private static readonly string Path_ = Paths.InData("settings.json");
+    /// <summary>Schema of settings.json this build writes. Bump together with <see cref="Migrate"/>.</summary>
+    public const int CurrentSchema = 2;
+
+    private static string FilePath => Paths.InData("settings.json");
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
-    public static AppSettings Current { get; private set; } = new();
+    public static AppSettings Current { get; private set; } = new() { SettingsVersion = CurrentSchema };
 
     private static readonly object _saveLock = new();
 
@@ -17,31 +20,104 @@ public static class SettingsService
     {
         try
         {
-            if (File.Exists(Path_))
+            if (!File.Exists(FilePath))
             {
-                var loaded = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path_));
-                if (loaded != null) Current = loaded;
+                Current = new AppSettings { SettingsVersion = CurrentSchema };
+                return;
             }
+
+            var loaded = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath));
+            if (loaded == null) return;
+
+            Current = loaded;
+            if (Current.SettingsVersion < CurrentSchema)
+            {
+                // Keep the pre-migration file next to the new one: a user rolling back to v1.x can
+                // restore it by hand, and a migration bug never costs anyone their settings.
+                TryCopy(FilePath, FilePath + $".v{Current.SettingsVersion}.bak");
+                Migrate(Current);
+                Save();
+            }
+            Normalize(Current);
         }
-        catch
+        catch (Exception ex)
         {
-            // A malformed/incompatible file would otherwise be silently overwritten with
-            // defaults on the next Save(), wiping every setting. Preserve it for recovery
-            // instead so the user (or a bug report) can see what went wrong.
-            TryPreserveCorruptFile();
-            Current = new AppSettings();
+            // A malformed file would otherwise be overwritten with defaults on the next Save().
+            // Preserve it so the user (or a bug report) can see what went wrong.
+            DiagnosticsService.Error("settings", "settings.json could not be read — starting with defaults", ex);
+            TryCopy(FilePath, FilePath + ".corrupt-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+            Current = new AppSettings { SettingsVersion = CurrentSchema };
         }
     }
 
-    private static void TryPreserveCorruptFile()
+    /// <summary>Upgrades a v1.x settings object in place.</summary>
+    private static void Migrate(AppSettings s)
     {
-        try
+        if (s.SettingsVersion < 2)
         {
-            if (!File.Exists(Path_)) return;
-            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-            File.Copy(Path_, Path_ + ".corrupt-" + stamp, overwrite: true);
+            // Theme: the single preset list became mode + accent. The old presets only ever changed
+            // the accent (Ocean also tinted the canvas), and their colours were copied into
+            // CustomTheme — keys that mean something different now, so they are dropped.
+            s.AccentName = s.ThemeName switch
+            {
+                "Indigo" => "Iris",
+                "Emerald" => "Emerald",
+                "Amber" => "Amber",
+                "Rose" => "Rose",
+                "Ocean" => "Ocean",
+                _ => "Mono",
+            };
+            s.ThemeName = null;
+            s.ThemeMode = ThemeService.ModeDark;
+            s.CustomTheme = new Dictionary<string, string>();
+
+            // FPS: the flag-based unlock stopped working with Roblox's FastFlag allowlist. Carry the
+            // user's intent over to the in-game frame-rate cap, which the client still honours.
+            if ((s.UnlockFps || s.FFlagUnlockFps) && s.MaxFps > 0)
+                s.FpsCap = Math.Clamp(s.MaxFps, 30, 1000);
+            s.UnlockFps = false;
+            s.FFlagUnlockFps = false;
+            s.MaxFps = 0;
+
+            // An explicit language was always saved as "en" before, so that says nothing about a
+            // choice. Only a non-English value was picked on purpose.
+            if (s.Language == "en") s.Language = "";
+
+            // Plugins used to load unconditionally. Keep them working for anyone who actually has
+            // some installed; everybody else gets the safer default.
+            try
+            {
+                string dir = PluginService.PluginDir;
+                s.EnablePlugins = Directory.Exists(dir) && Directory.EnumerateFiles(dir, "*.dll").Any();
+            }
+            catch { s.EnablePlugins = false; }
+
+            if (s.WindowWidth < 1180) s.WindowWidth = 1280;
+            if (s.WindowHeight < 740) s.WindowHeight = 800;
+
+            s.SettingsVersion = 2;
         }
-        catch { /* best-effort */ }
+    }
+
+    /// <summary>Clamps values a hand-edited file could have pushed out of range.</summary>
+    private static void Normalize(AppSettings s)
+    {
+        s.AccountJoinDelay = Math.Clamp(s.AccountJoinDelay, 0, 600);
+        s.ShufflePageCount = Math.Clamp(s.ShufflePageCount, 1, 25);
+        s.PresencePollSeconds = Math.Clamp(s.PresencePollSeconds, 5, 600);
+        s.UpdateCheckMinutes = Math.Clamp(s.UpdateCheckMinutes, 15, 1440);
+        s.WebApiPort = Math.Clamp(s.WebApiPort, 1024, 65535);
+        s.AutoLockMinutes = Math.Clamp(s.AutoLockMinutes, 1, 240);
+        s.ClipboardClearSeconds = Math.Clamp(s.ClipboardClearSeconds, 0, 600);
+        s.FpsCap = s.FpsCap <= 0 ? 0 : Math.Clamp(s.FpsCap, 30, 1000);
+        if (!ThemeService.Modes.Contains(s.ThemeMode)) s.ThemeMode = ThemeService.ModeDark;
+        if (!ThemeService.AccentNames.Contains(s.AccentName)) s.AccentName = "Mono";
+        s.CustomTheme ??= new();
+        s.CustomFFlags ??= new();
+        s.SavedPlaces ??= new();
+        s.LaunchPresets ??= new();
+        s.ScheduledTasks ??= new();
+        s.Hotkeys ??= new();
     }
 
     public static void Save()
@@ -52,24 +128,33 @@ public static class SettingsService
             lock (_saveLock)
             {
                 Directory.CreateDirectory(Paths.DataDir);
-                // Atomic write: stage to a temp file then swap, so a crash mid-write can
-                // never truncate settings.json.
-                string tmp = Path_ + ".tmp";
+                // Atomic write: stage to a temp file then swap, so a crash mid-write can never
+                // truncate settings.json.
+                string tmp = FilePath + ".tmp";
                 File.WriteAllText(tmp, json);
-                if (File.Exists(Path_))
-                    File.Replace(tmp, Path_, null);
+                if (File.Exists(FilePath))
+                    File.Replace(tmp, FilePath, null);
                 else
-                    File.Move(tmp, Path_);
+                    File.Move(tmp, FilePath);
             }
         }
+        catch (Exception ex)
+        {
+            DiagnosticsService.Warn("settings", "settings.json could not be saved", ex);
+        }
+    }
+
+    private static void TryCopy(string from, string to)
+    {
+        try { if (File.Exists(from)) File.Copy(from, to, overwrite: true); }
         catch { /* best-effort */ }
     }
 }
 
 /// <summary>
-/// Central place for on-disk locations. Data lives next to the executable (portable)
-/// when that folder is writable or a "portable.txt" marker is present; otherwise it
-/// falls back to %APPDATA%\RobloxAccountManager so installs under Program Files still work.
+/// Central place for on-disk locations. Data lives next to the executable (portable) when that
+/// folder is writable or a "portable.txt" marker is present; otherwise it falls back to
+/// %APPDATA%\RobloxAccountManager so installs under Program Files still work.
 /// </summary>
 public static class Paths
 {
@@ -81,11 +166,17 @@ public static class Paths
 
     public static bool IsPortable { get; private set; }
 
+    /// <summary>Redirects all data to another folder. Only the debug demo mode uses this, before anything is read.</summary>
+    internal static void OverrideDataDir(string dir)
+    {
+        _dataDir = dir;
+        IsPortable = false;
+    }
+
     private static string ResolveDataDir()
     {
         string local = System.IO.Path.Combine(BaseDir, "data");
 
-        // Explicit portable marker, or an already-initialised local data folder -> stay local.
         if (System.IO.File.Exists(System.IO.Path.Combine(BaseDir, "portable.txt"))
             || System.IO.Directory.Exists(local))
         {
@@ -93,7 +184,6 @@ public static class Paths
             return local;
         }
 
-        // Otherwise keep it local only if we can actually write there.
         try
         {
             System.IO.Directory.CreateDirectory(local);

@@ -20,6 +20,12 @@ public static class AppInfo
     /// <summary>Compact badge form, e.g. "v1.1.0".</summary>
     public static string Short => $"v{Number}";
 
-    /// <summary>Settings-page form, e.g. "Version 1.1.0".</summary>
-    public static string Long => $"Version {Number}";
+    /// <summary>Settings-page form, e.g. "Version 1.1.0" (localized).</summary>
+    public static string Long => Services.L.T("App.Version", Number);
+
+    /// <summary>
+    /// True in the debug-only demo mode: sample accounts in a temporary folder, no network polling,
+    /// no registry or update work. Always false in release builds.
+    /// </summary>
+    public static bool IsDemo { get; internal set; }
 }

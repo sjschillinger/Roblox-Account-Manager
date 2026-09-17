@@ -39,12 +39,16 @@ public static class PluginService
     /// <summary>Scans <see cref="PluginDir"/>, loads every DLL, and calls OnLoad on each plugin type.</summary>
     public static void Load()
     {
+        // Plugins are arbitrary code running with the manager's access to every account, so nothing
+        // is loaded unless the user turned plugins on (Settings → Integrations).
+        if (!SettingsService.Current.EnablePlugins) return;
+
         lock (_gate)
         {
             if (_plugins.Count > 0) return; // already loaded
 
             string dir = PluginDir;
-            try { System.IO.Directory.CreateDirectory(dir); } catch { return; }
+            if (!System.IO.Directory.Exists(dir)) return;
 
             string[] dlls;
             try { dlls = System.IO.Directory.GetFiles(dir, "*.dll"); }
@@ -142,28 +146,14 @@ public static class PluginService
             var acc = GetAccounts().FirstOrDefault(a => a.UserId == userId);
             if (acc == null) return false;
             if (placeId == 0) placeId = SettingsService.Current.DefaultPlaceId;
+            if (placeId <= 0) return false;
             var r = await LauncherService.LaunchAsync(acc, placeId, string.IsNullOrWhiteSpace(jobId) ? null : jobId);
             return r.Success;
         }
 
-        public int Close(long userId)
-        {
-            int killed = 0;
-            foreach (var t in ProcessRegistry.ForUser(userId).ToList())
-            {
-                try
-                {
-                    using var p = System.Diagnostics.Process.GetProcessById(t.Pid);
-                    p.Kill();
-                    ProcessRegistry.Forget(t.Pid);
-                    killed++;
-                }
-                catch { }
-            }
-            return killed;
-        }
+        public int Close(long userId) => InstanceControlService.CloseFor(userId);
 
-        public void Log(string message) => System.Diagnostics.Debug.WriteLine($"[plugin] {message}");
+        public void Log(string message) => DiagnosticsService.Log("plugin", message);
 
         public event Action<PluginEvent>? AccountLaunched;
         public event Action<PluginEvent>? AccountClosed;

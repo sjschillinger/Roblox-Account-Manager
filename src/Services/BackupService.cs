@@ -37,6 +37,15 @@ public static class BackupService
         public string Description { get; set; } = "";
         public string TotpSecret { get; set; } = "";
         public string BrowserTrackerId { get; set; } = "";
+
+        // v2.0+: carried so a restore brings the whole account back, not just its session.
+        public string Color { get; set; } = "";
+        public bool IsFavorite { get; set; }
+        public bool AutoRejoin { get; set; }
+        public string FFlags { get; set; } = "";
+        public string ProxyUrl { get; set; } = "";
+        public DateTime? AddedUtc { get; set; }
+        public DateTime? CookieUpdatedUtc { get; set; }
     }
 
     public static void Export(IEnumerable<Account> accounts, string path, string password)
@@ -51,7 +60,14 @@ public static class BackupService
             Group = a.Group,
             Description = a.Description,
             TotpSecret = a.TotpSecret,
-            BrowserTrackerId = a.BrowserTrackerId
+            BrowserTrackerId = a.BrowserTrackerId,
+            Color = a.Color,
+            IsFavorite = a.IsFavorite,
+            AutoRejoin = a.AutoRejoin,
+            FFlags = a.FFlags,
+            ProxyUrl = a.ProxyUrl,
+            AddedUtc = a.AddedUtc,
+            CookieUpdatedUtc = a.CookieUpdatedUtc,
         }).ToList();
 
         byte[] json = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(entries, JsonOpts));
@@ -77,7 +93,7 @@ public static class BackupService
     {
         byte[] all = File.ReadAllBytes(path);
         if (all.Length < Magic.Length || !all.AsSpan(0, Magic.Length).SequenceEqual(Magic))
-            throw new InvalidDataException("Not a Roblox Account Manager backup file.");
+            throw new InvalidDataException(L.T("Backup.NotABackup"));
 
         byte[] enc = all[Magic.Length..];
         byte[] plain = Crypto.Decrypt(enc, password);   // throws on wrong password / tamper
@@ -93,7 +109,14 @@ public static class BackupService
             Group = string.IsNullOrWhiteSpace(e.Group) ? "Default" : e.Group,
             Description = e.Description,
             TotpSecret = e.TotpSecret,
-            BrowserTrackerId = e.BrowserTrackerId
+            BrowserTrackerId = e.BrowserTrackerId,
+            Color = e.Color ?? "",
+            IsFavorite = e.IsFavorite,
+            AutoRejoin = e.AutoRejoin,
+            FFlags = e.FFlags ?? "",
+            ProxyUrl = e.ProxyUrl ?? "",
+            AddedUtc = e.AddedUtc ?? DateTime.UtcNow,
+            CookieUpdatedUtc = e.CookieUpdatedUtc,
         }).ToList();
     }
 }

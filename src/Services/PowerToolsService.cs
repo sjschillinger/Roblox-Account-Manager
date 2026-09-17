@@ -24,14 +24,14 @@ public static class PowerToolsService
 
     private static async Task<(List<GameServer> servers, string? error)> LoadJoinableAsync(long placeId)
     {
-        if (placeId <= 0) return (new(), "Enter a valid Place ID first.");
+        if (placeId <= 0) return (new(), L.T("Launch.NeedPlace"));
         List<GameServer> servers;
         try { servers = await RobloxApi.GetPublicServersAsync(placeId); }
-        catch (Exception ex) { return (new(), $"Couldn't load the server list: {ex.Message}"); }
+        catch (Exception ex) { return (new(), L.T("Servers.LoadFailed", ex.Message)); }
 
         var joinable = servers.Where(Joinable).ToList();
         if (joinable.Count == 0)
-            return (new(), "No joinable public servers found for that place right now.");
+            return (new(), L.T("Servers.NoneJoinable"));
         return (joinable, null);
     }
 
@@ -80,7 +80,6 @@ public static class PowerToolsService
 
         var emptiest = servers.OrderBy(s => s.Playing).First();
         int room = emptiest.MaxPlayers - emptiest.Playing;
-        return new(emptiest.Id, emptiest, Warning:
-            $"No single server has room for all {squadSize} — using the emptiest ({room} free slot(s)); some may not make it in.");
+        return new(emptiest.Id, emptiest, Warning: L.T("Launch.Squad.NoRoom", squadSize, room));
     }
 }

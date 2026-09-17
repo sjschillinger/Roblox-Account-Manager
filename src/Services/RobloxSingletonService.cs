@@ -60,7 +60,7 @@ public static class RobloxSingletonService
     private static volatile bool _mutexOpen;
 
     // ---- observable state for the settings page ----
-    private static volatile string _status = "Not started.";
+    private static volatile string _status = "";
     private static int _totalClosed;
     private static volatile bool _accessDenied;
     private static bool _warned;                  // one-shot "restart as admin" nudge
@@ -69,7 +69,7 @@ public static class RobloxSingletonService
     public static event Action? StatusChanged;
 
     /// <summary>Human-readable one-liner describing the current guard state.</summary>
-    public static string StatusText => _status;
+    public static string StatusText => _status.Length > 0 ? _status : L.T("Multi.Status.NotStarted");
 
     /// <summary>True while a handle to <c>ROBLOX_singletonMutex</c> is held open.</summary>
     public static bool MutexHeld => _mutexOpen;
@@ -99,7 +99,7 @@ public static class RobloxSingletonService
     public static void Apply()
     {
         var s = SettingsService.Current;
-        if (!s.EnableMultiInstance) { Stop(); SetStatus("Multi-instance is off."); return; }
+        if (!s.EnableMultiInstance) { Stop(); SetStatus(L.T("Multi.Status.Off")); return; }
 
         EnsureMutex(true);
 
@@ -114,8 +114,8 @@ public static class RobloxSingletonService
         {
             StopWatcher();
             SetStatus(_mutexOpen
-                ? "Mutex held. Clients started outside the app may still reuse a running window."
-                : "Multi-instance could not take the Roblox mutex.");
+                ? L.T("Multi.Status.MutexOnly")
+                : L.T("Multi.Status.NoMutex"));
         }
     }
 
@@ -208,7 +208,7 @@ public static class RobloxSingletonService
         catch (Exception ex)
         {
             _mutexOpen = false;
-            SetStatus($"Could not hold the Roblox mutex: {ex.Message}");
+            SetStatus(L.T("Multi.Status.MutexFailed", ex.Message));
         }
         finally
         {
@@ -257,12 +257,12 @@ public static class RobloxSingletonService
     {
         int closed;
         try { closed = Sweep(force: true); }
-        catch (Exception ex) { message = $"Sweep failed: {ex.Message}"; return 0; }
+        catch (Exception ex) { message = L.T("Multi.Sweep.Failed", ex.Message); return 0; }
 
-        if (closed > 0) message = $"Cleared {closed} Roblox instance lock(s) — launching from the website works now.";
-        else if (_accessDenied) message = "Windows blocked access to the Roblox process. Restart the manager as administrator.";
-        else if (ClientPids().Count == 0) message = "No Roblox client is running — nothing to clear.";
-        else message = "Roblox is already unlocked for multi-instance.";
+        if (closed > 0) message = L.N("Multi.Sweep.Cleared", closed);
+        else if (_accessDenied) message = L.T("Multi.Sweep.Denied");
+        else if (ClientPids().Count == 0) message = L.T("Multi.Sweep.NoClients");
+        else message = L.T("Multi.Sweep.AlreadyUnlocked");
         return closed;
     }
 
@@ -281,8 +281,8 @@ public static class RobloxSingletonService
             {
                 lock (_cleaned) _cleaned.Clear();
                 SetStatus(_mutexOpen
-                    ? "Ready — no Roblox client running."
-                    : "Ready, but the Roblox mutex is not held.");
+                    ? L.T("Multi.Status.Ready")
+                    : L.T("Multi.Status.ReadyNoMutex"));
                 return 0;
             }
 
@@ -324,17 +324,15 @@ public static class RobloxSingletonService
             }
 
             SetStatus(denied
-                ? $"Blocked by Windows on {pids.Count} client(s) — restart as administrator to fix."
-                : $"Active — {pids.Count} Roblox client(s) unlocked, {TotalClosed} lock(s) cleared this session.");
+                ? L.N("Multi.Status.Blocked", pids.Count)
+                : L.N("Multi.Status.Active", pids.Count, TotalClosed));
 
             // Say it once. Silently doing nothing is the failure mode users can't diagnose,
             // and repeating it every two seconds would be worse than saying nothing at all.
             if (denied && !_warned && SettingsService.Current.MultiInstanceStartupCheck)
             {
                 _warned = true;
-                ToastService.Warning("Multi-instance blocked",
-                    "Windows won't let the manager unlock Roblox. Restart it as administrator "
-                    + "(Settings → Launch) or extra clients started from the website won't open.");
+                ToastService.Warning(L.T("Multi.Toast.Title"), L.T("Multi.Toast.Body"));
             }
             return closed;
         }

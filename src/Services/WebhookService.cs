@@ -23,8 +23,19 @@ public static class WebhookService
     public const int ColorAmber  = 0xE3B341; // warning
     public const int ColorPurple = 0x7B61FF; // in-game / neutral
 
-    public static bool Configured =>
-        !string.IsNullOrWhiteSpace(SettingsService.Current.DiscordWebhookUrl);
+    public static bool Configured => IsDiscordWebhook(SettingsService.Current.DiscordWebhookUrl);
+
+    /// <summary>
+    /// Only https URLs on Discord's own hosts count as a webhook. Account names and places are posted
+    /// to this URL, so a typo or a pasted look-alike must not send them to some other server.
+    /// </summary>
+    public static bool IsDiscordWebhook(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme != Uri.UriSchemeHttps) return false;
+        bool discordHost = uri.Host is "discord.com" or "discordapp.com" or "canary.discord.com" or "ptb.discord.com";
+        return discordHost && uri.AbsolutePath.StartsWith("/api/webhooks/", StringComparison.OrdinalIgnoreCase);
+    }
 
     // ------------------------------------------------------------------
     //  Plain content (legacy)
@@ -32,7 +43,7 @@ public static class WebhookService
     public static async Task SendAsync(string content)
     {
         var url = SettingsService.Current.DiscordWebhookUrl;
-        if (string.IsNullOrWhiteSpace(url)) return;
+        if (!IsDiscordWebhook(url)) return;
         try
         {
             string body = JsonSerializer.Serialize(new
@@ -56,7 +67,7 @@ public static class WebhookService
         string? thumbnailUrl = null, IEnumerable<(string Name, string Value)>? fields = null)
     {
         var url = SettingsService.Current.DiscordWebhookUrl;
-        if (string.IsNullOrWhiteSpace(url)) return;
+        if (!IsDiscordWebhook(url)) return;
 
         try
         {

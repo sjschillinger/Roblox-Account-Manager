@@ -1,16 +1,14 @@
-using System.Diagnostics;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Interop;
-using System.Runtime.InteropServices;
 using RobloxAccountManager.Services;
 
 namespace RobloxAccountManager.Views;
 
 /// <summary>
-/// Rich update prompt: current → new version, publish date, download size, full release
-/// notes and a link to the GitHub release. DialogResult == true means "install now";
-/// <see cref="Skipped"/> distinguishes "Later" from "never offer this version again".
+/// Update prompt: current → new version, publish date, download size and the release notes.
+/// DialogResult == true means "install now"; <see cref="Skipped"/> tells "Later" apart from
+/// "never offer this version again".
 /// </summary>
 public partial class UpdatePromptWindow : Window
 {
@@ -26,41 +24,43 @@ public partial class UpdatePromptWindow : Window
         CurrentVersionText.Text = UpdateService.CurrentVersionText;
         NewVersionText.Text = info.VersionText;
 
-        var meta = new List<string>();
-        if (info.PublishedAt is { } dt) meta.Add($"Published {dt.ToLocalTime():d MMM yyyy}");
-        if (info.SizeText.Length > 0) meta.Add($"Download {info.SizeText}");
-        if (info.IsPrerelease) meta.Add("Pre-release");
-        if (!string.IsNullOrEmpty(info.Sha256)) meta.Add("Checksum published");
-        meta.Add("github.com/Vaelixx/Roblox-Account-Manager");
-        MetaText.Text = string.Join("   ·   ", meta);
+        if (info.PublishedAt is { } dt) AddMeta("Icon.Calendar", L.T("Updates.Published", dt.ToLocalTime().ToString("d")));
+        if (info.SizeText.Length > 0) AddMeta("Icon.Download", info.SizeText);
+        if (!string.IsNullOrEmpty(info.Sha256)) AddMeta("Icon.ShieldCheck", L.T("Updates.Checksum"));
+        if (info.IsPrerelease) AddMeta("Icon.Alert", L.T("Updates.Prerelease"));
 
         _releasePageUrl = string.IsNullOrEmpty(info.ReleasePageUrl)
             ? "https://github.com/Vaelixx/Roblox-Account-Manager/releases/latest"
             : info.ReleasePageUrl;
 
         ReleaseNotesRenderer.Render(info.Notes, NotesPanel);
+
+        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { e.Handled = true; DialogResult = false; } };
+    }
+
+    private void AddMeta(string iconKey, string text)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 16, 0) };
+        var icon = new System.Windows.Shapes.Path
+        {
+            Data = (System.Windows.Media.Geometry)FindResource(iconKey),
+            Style = (Style)FindResource("IconPath"),
+            Width = 13, Height = 13,
+            Margin = new Thickness(0, 0, 6, 0),
+        };
+        icon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextMutedBrush");
+        row.Children.Add(icon);
+        row.Children.Add(new TextBlock { Text = text, Style = (Style)FindResource("Text.Caption"), VerticalAlignment = VerticalAlignment.Center });
+        MetaPanel.Children.Add(row);
     }
 
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        if (Owner == null)
-        {
-            // Tray-only start: no visible owner to center on.
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        }
-
-        // Rounded corners on Windows 11 (same treatment as UpdaterWindow).
-        var hwnd = new WindowInteropHelper(this).Handle;
-        int pref = 2; // DWMWCP_ROUND
-        _ = DwmSetWindowAttribute(hwnd, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, ref pref, sizeof(int));
+        if (Owner == null) WindowStartupLocation = WindowStartupLocation.CenterScreen;
     }
 
-    private void ViewOnGitHub_Click(object sender, RoutedEventArgs e)
-    {
-        try { Process.Start(new ProcessStartInfo(_releasePageUrl) { UseShellExecute = true }); }
-        catch { /* browser launch is best-effort */ }
-    }
+    private void ViewOnGitHub_Click(object sender, RoutedEventArgs e) => BrowserService.OpenUrl(_releasePageUrl);
 
     private void UpdateNow_Click(object sender, RoutedEventArgs e) => DialogResult = true;
 
@@ -72,11 +72,9 @@ public partial class UpdatePromptWindow : Window
         DialogResult = false;
     }
 
-    private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private void Drag_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ButtonState == MouseButtonState.Pressed) DragMove();
+        if (e.ButtonState != MouseButtonState.Pressed) return;
+        try { DragMove(); } catch (InvalidOperationException) { }
     }
-
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 }

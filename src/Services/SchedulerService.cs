@@ -29,6 +29,30 @@ public static class SchedulerService
         }
     }
 
+    /// <summary>"9:5" and "09:05" both mean 09:05 — normalise what a hand-edited file might hold.</summary>
+    public static string NormalizeTime(string? value)
+        => TimeSpan.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var t) && t >= TimeSpan.Zero && t < TimeSpan.FromDays(1)
+            ? $"{t.Hours:00}:{t.Minutes:00}"
+            : "";
+
+    /// <summary>The next local time this task will run, or null when it never will (disabled or invalid).</summary>
+    public static DateTime? NextRun(ScheduledTask task, DateTime? from = null)
+    {
+        if (!task.Enabled) return null;
+        string hhmm = NormalizeTime(task.TimeOfDay);
+        if (hhmm.Length == 0) return null;
+        var now = from ?? DateTime.Now;
+        var time = TimeSpan.Parse(hhmm, System.Globalization.CultureInfo.InvariantCulture);
+        for (int day = 0; day <= 7; day++)
+        {
+            var candidate = now.Date.AddDays(day).Add(time);
+            if (candidate <= now) continue;
+            if (task.Days.Count > 0 && !task.Days.Contains(candidate.DayOfWeek)) continue;
+            return candidate;
+        }
+        return null;
+    }
+
     /// <summary>Time until shortly after the next wall-clock minute boundary.</summary>
     private static TimeSpan DueToNextMinute()
     {
@@ -54,7 +78,7 @@ public static class SchedulerService
             foreach (var task in SettingsService.Current.ScheduledTasks.ToArray())
             {
                 if (!task.Enabled) continue;
-                if (task.TimeOfDay != hhmm) continue;
+                if (!string.Equals(NormalizeTime(task.TimeOfDay), hhmm, StringComparison.Ordinal)) continue;
                 if (task.Days.Count > 0 && !task.Days.Contains(now.DayOfWeek)) continue;
 
                 // Fire at most once per matching minute.
@@ -91,17 +115,26 @@ public static class SchedulerService
             var preExisting = new HashSet<int>();
             foreach (var t in ProcessRegistry.All) preExisting.Add(t.Pid);
 
+            if (LockService.IsLocked)
+            {
+                DiagnosticsService.Warn("scheduler", $"Skipped task '{task.Name}': the manager is locked");
+                return;
+            }
+
             if (!string.IsNullOrWhiteSpace(task.PresetName))
             {
                 var preset = PresetService.Find(task.PresetName);
                 if (preset != null) await PresetService.LaunchAsync(preset);
+                else DiagnosticsService.Warn("scheduler", $"Task '{task.Name}': preset '{task.PresetName}' no longer exists");
             }
             else if (!string.IsNullOrWhiteSpace(task.Alias))
             {
                 var acc = _resolve?.Invoke(task.Alias);
-                if (acc != null)
+                if (acc != null && task.PlaceId > 0)
                     await LauncherService.LaunchAsync(acc, task.PlaceId);
+                else DiagnosticsService.Warn("scheduler", $"Task '{task.Name}': account or place is missing");
             }
+            ToastService.Info(L.T("Toast.TaskRan.Title"), task.Name);
 
             // ---- Optional auto-close ----
             if (task.AutoCloseAfterMinutes > 0)
@@ -134,16 +167,13 @@ public static class SchedulerService
             if (preExisting.Contains(t.Pid)) continue;   // was already running — not ours to close
             try
             {
-                using var p = System.Diagnostics.Process.GetProcessById(t.Pid);
-                p.Kill();
-                ProcessRegistry.Forget(t.Pid);
-                closed++;
+                if (InstanceControlService.Close(t.Pid)) closed++;
             }
             catch (Exception ex) { DiagnosticsService.Warn("scheduler", $"Auto-close failed for pid {t.Pid}", ex); }
         }
 
         if (closed > 0)
-            DiagnosticsService.Log("scheduler", $"Auto-closed {closed} client(s) for task '{task.Alias ?? task.PresetName}'");
+            DiagnosticsService.Log("scheduler", $"Auto-closed {closed} client(s) for task '{task.Name}'");
     }
 
     private static HashSet<long> ResolveTargetUserIds(ScheduledTask task)

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using RobloxAccountManager.Models;
 using RobloxAccountManager.Mvvm;
 using RobloxAccountManager.Services;
@@ -9,120 +10,161 @@ public class ServerBrowserViewModel : ObservableObject
 {
     private readonly AccountStore _store;
     private readonly MainViewModel _main;
-
-    public ObservableCollection<GameServer> Servers { get; } = new();
-
-    private string _placeIdText = "";
-    public string PlaceIdText { get => _placeIdText; set => SetField(ref _placeIdText, value); }
-
-    private string _placeName = "";
-    public string PlaceName { get => _placeName; set => SetField(ref _placeName, value); }
-
-    private bool _isSubPlace;
-    /// <summary>True when the browsed Place ID is a sub-place (teleport/co-edit) of its universe, not the root game.</summary>
-    public bool IsSubPlace { get => _isSubPlace; set => SetField(ref _isSubPlace, value); }
-
-    private string _subPlaceTip = "";
-    public string SubPlaceTip { get => _subPlaceTip; set => SetField(ref _subPlaceTip, value); }
-
-    private GameServer? _selected;
-    public GameServer? Selected { get => _selected; set => SetField(ref _selected, value); }
-
-    private bool _busy;
-    public bool Busy { get => _busy; set => SetField(ref _busy, value); }
-
-    public int ServerCount => Servers.Count;
-
-    private bool _sortByPing;
-    /// <summary>false = sort by player count (busiest first); true = sort by ping (lowest first).</summary>
-    public bool SortByPing
-    {
-        get => _sortByPing;
-        set { if (SetField(ref _sortByPing, value)) { OnPropertyChanged(nameof(SortModeLabel)); ApplySort(); } }
-    }
-    public string SortModeLabel => _sortByPing ? "Sort: Ping" : "Sort: Players";
-
-    public AsyncRelayCommand RefreshCommand { get; }
-    public AsyncRelayCommand JoinCommand { get; }
-    public RelayCommand CopyJobIdCommand { get; }
-    public RelayCommand ToggleSortCommand { get; }
-    public RelayCommand CopyPlaceIdCommand { get; }
+    private List<GameServer> _loaded = new();
 
     public ServerBrowserViewModel(AccountStore store, MainViewModel main)
     {
         _store = store;
         _main = main;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync);
-        JoinCommand = new AsyncRelayCommand(JoinAsync);
-        CopyJobIdCommand = new RelayCommand(_ => CopyJobId());
-        ToggleSortCommand = new RelayCommand(_ => SortByPing = !SortByPing);
-        CopyPlaceIdCommand = new RelayCommand(_ => CopyPlaceId());
+        JoinCommand = new AsyncRelayCommand(p => JoinAsync(p as GameServer ?? _selected));
+        CopyJobIdCommand = new RelayCommand(p =>
+        {
+            if ((p as GameServer ?? _selected) is { } s)
+                _main.SetStatus(ClipboardService.CopyText(s.Id) ? L.T("Servers.JobCopied") : L.T("Status.ClipboardBusy"));
+        });
+        CopyLinkCommand = new RelayCommand(p =>
+        {
+            if ((p as GameServer ?? _selected) is { } s && _placeId > 0)
+                _main.SetStatus(ClipboardService.CopyText($"roblox://experiences/start?placeId={_placeId}&gameInstanceId={s.Id}")
+                    ? L.T("Servers.LinkCopied") : L.T("Status.ClipboardBusy"));
+        });
     }
 
-    private void ApplySort()
-    {
-        var ordered = _sortByPing
-            ? Servers.OrderBy(s => s.Ping <= 0 ? int.MaxValue : s.Ping).ToList()
-            : Servers.OrderByDescending(s => s.Playing).ToList();
+    public ObservableCollection<GameServer> Servers { get; } = new();
+    public ObservableCollection<Account> Accounts => _store.Accounts;
 
-        // Clearing the collection makes the list control drop its SelectedItem, so flipping the
-        // sort used to silently throw away the server the user had just picked — and Join then
-        // reported "Select a server first". Put the same row back afterwards.
+    public bool MaskUsernames => SettingsService.Current.HideUsernames;
+
+    private string _placeIdText = "";
+    public string PlaceIdText { get => _placeIdText; set => SetField(ref _placeIdText, value ?? ""); }
+
+    private long _placeId;
+
+    private string _placeName = "";
+    public string PlaceName { get => _placeName; private set { if (SetField(ref _placeName, value)) OnPropertyChanged(nameof(HasPlace)); } }
+
+    private string _placeCreator = "";
+    public string PlaceCreator { get => _placeCreator; private set => SetField(ref _placeCreator, value); }
+
+    private string? _placeIcon;
+    public string? PlaceIcon { get => _placeIcon; private set => SetField(ref _placeIcon, value); }
+
+    public bool HasPlace => _placeName.Length > 0;
+
+    private bool _isSubPlace;
+    public bool IsSubPlace { get => _isSubPlace; private set => SetField(ref _isSubPlace, value); }
+
+    private string _subPlaceTip = "";
+    public string SubPlaceTip { get => _subPlaceTip; private set => SetField(ref _subPlaceTip, value); }
+
+    private GameServer? _selected;
+    public GameServer? Selected { get => _selected; set => SetField(ref _selected, value); }
+
+    private Account? _joinAccount;
+    /// <summary>Account that joins; defaults to the one selected on the Accounts page.</summary>
+    public Account? JoinAccount
+    {
+        get => _joinAccount ?? _main.Accounts.Selected ?? _store.Accounts.FirstOrDefault(a => a.IsValid);
+        set => SetField(ref _joinAccount, value);
+    }
+
+    /// <summary>The default join account follows the Accounts page until one is picked here.</summary>
+    public void OnShown() => OnPropertyChanged(nameof(JoinAccount));
+
+    private bool _busy;
+    public bool Busy { get => _busy; private set { if (SetField(ref _busy, value)) OnPropertyChanged(nameof(ShowEmpty)); } }
+
+    private string _sortMode = "Players";
+    /// <summary>Players (fullest first) | Empty (emptiest first) | Ping (lowest first)</summary>
+    public string SortMode { get => _sortMode; set { if (SetField(ref _sortMode, value ?? "Players")) ApplyView(); } }
+
+    private bool _hideFull = true;
+    public bool HideFull { get => _hideFull; set { if (SetField(ref _hideFull, value)) ApplyView(); } }
+
+    public int ServerCount => Servers.Count;
+    public int PlayerCount => Servers.Sum(s => s.Playing);
+    public bool ShowEmpty => !_busy && Servers.Count == 0;
+    public string Summary => _loaded.Count == 0 ? L.T("Servers.Subtitle") : L.N("Servers.Summary", Servers.Count, PlayerCount);
+
+    public AsyncRelayCommand RefreshCommand { get; }
+    public AsyncRelayCommand JoinCommand { get; }
+    public RelayCommand CopyJobIdCommand { get; }
+    public RelayCommand CopyLinkCommand { get; }
+
+    public void RefreshLocalized() => OnPropertyChanged(string.Empty);
+
+    private void ApplyView()
+    {
+        IEnumerable<GameServer> view = _loaded;
+        if (_hideFull) view = view.Where(s => s.Playing < s.MaxPlayers);
+        view = _sortMode switch
+        {
+            "Ping" => view.OrderBy(s => s.Ping <= 0 ? int.MaxValue : s.Ping),
+            "Empty" => view.OrderBy(s => s.Playing),
+            _ => view.OrderByDescending(s => s.Playing),
+        };
+
         var keep = _selected;
         Servers.Clear();
-        foreach (var s in ordered) Servers.Add(s);
+        foreach (var s in view) Servers.Add(s);
         if (keep != null && Servers.Contains(keep)) Selected = keep;
+
+        OnPropertyChanged(nameof(ServerCount));
+        OnPropertyChanged(nameof(PlayerCount));
+        OnPropertyChanged(nameof(ShowEmpty));
+        OnPropertyChanged(nameof(Summary));
     }
 
-    private void CopyPlaceId()
+    private static long ParsePlace(string text)
     {
-        var t = new string(PlaceIdText.Where(char.IsDigit).ToArray());
-        if (string.IsNullOrEmpty(t)) { _main.SetStatus("No Place ID to copy."); return; }
-        try { System.Windows.Clipboard.SetText(t); _main.SetStatus($"Place ID {t} copied."); }
-        catch { _main.SetStatus("Could not access the clipboard."); }
+        text = text.Trim();
+        if (text.Contains("roblox", StringComparison.OrdinalIgnoreCase))
+        {
+            var parsed = RobloxApi.ParseJoinLink(text);
+            if (parsed.PlaceId > 0) return parsed.PlaceId;
+        }
+        var digits = new string(text.Where(char.IsDigit).ToArray());
+        return digits.Length is > 0 and <= 18 && long.TryParse(digits, out long id) ? id : 0;
     }
 
     public async Task RefreshAsync()
     {
-        var t = new string(PlaceIdText.Where(char.IsDigit).ToArray());
-        if (!long.TryParse(t, out long placeId) || placeId <= 0)
+        long placeId = ParsePlace(PlaceIdText);
+        if (placeId <= 0)
         {
-            _main.SetStatus("Enter a valid Place ID to browse servers.");
+            _main.SetStatus(L.T("Launch.NeedPlace"));
             return;
         }
 
+        _placeId = placeId;
         Busy = true;
-        Servers.Clear();
-        OnPropertyChanged(nameof(ServerCount));
-        _main.SetStatus("Loading servers…");
+        _loaded.Clear();
+        ApplyView();
+        _main.SetStatus(L.T("Servers.Loading"));
 
         try
         {
             IsSubPlace = false;
             SubPlaceTip = "";
-            var cookie = _store.Accounts.FirstOrDefault(a => a.IsValid)?.Cookie;
-            if (cookie != null)
+            var cookie = _store.Accounts.FirstOrDefault(a => a.IsValid)?.Cookie ?? "";
+            var info = await RobloxApi.GetPlaceInfoAsync(cookie, placeId);
+            PlaceName = info?.Name ?? L.T("Place.Fallback", placeId);
+            PlaceCreator = string.IsNullOrEmpty(info?.Creator) ? "" : L.T("Launch.By", info!.Creator);
+            PlaceIcon = info != null ? await RobloxApi.GetGameIconAsync(info.UniverseId) : null;
+            if (info is { IsSubPlace: true })
             {
-                var info = await RobloxApi.GetPlaceInfoAsync(cookie, placeId);
-                PlaceName = info?.Name ?? $"Place {placeId}";
-                if (info != null && info.IsSubPlace)
-                {
-                    IsSubPlace = true;
-                    SubPlaceTip = $"Place {info.PlaceId} is a sub-place of universe {info.UniverseId} (root place {info.RootPlaceId}). Servers here are teleport/co-edit instances, not the main game.";
-                }
+                IsSubPlace = true;
+                SubPlaceTip = L.T("Servers.SubPlaceTip", info.PlaceId, info.RootPlaceId);
             }
 
-            var list = await RobloxApi.GetPublicServersAsync(placeId, SettingsService.Current.ShufflePageCount);
-            foreach (var s in list) Servers.Add(s);
-            ApplySort();
-
-            OnPropertyChanged(nameof(ServerCount));
-            _main.SetStatus($"Found {Servers.Count} public server(s).");
+            _loaded = await RobloxApi.GetPublicServersAsync(placeId, SettingsService.Current.ShufflePageCount);
+            ApplyView();
+            _main.SetStatus(L.N("Servers.Found", _loaded.Count));
         }
         catch (Exception ex)
         {
-            // Never leave Busy stuck true (buttons would stay disabled for the session).
-            _main.SetStatus($"Could not load servers: {ex.Message}");
+            _main.SetStatus(L.T("Servers.LoadFailed", ex.Message));
         }
         finally
         {
@@ -130,35 +172,16 @@ public class ServerBrowserViewModel : ObservableObject
         }
     }
 
-    private async Task JoinAsync()
+    private async Task JoinAsync(GameServer? server)
     {
-        if (_selected == null) { _main.SetStatus("Select a server first."); return; }
-        var acc = _main.Accounts.Selected ?? _store.Accounts.FirstOrDefault(a => a.IsValid);
-        if (acc == null) { _main.SetStatus("Select an account on the Accounts page first."); return; }
-        var t = new string(PlaceIdText.Where(char.IsDigit).ToArray());
-        if (!long.TryParse(t, out long placeId)) return;
+        if (server == null) { _main.SetStatus(L.T("Servers.PickServer")); return; }
+        var acc = JoinAccount;
+        if (acc == null) { _main.SetStatus(L.T("Status.SelectFirst")); return; }
+        if (_placeId <= 0) return;
 
-        Busy = true;
-        _main.SetStatus($"Joining {acc.DisplayNameOrUser} into server {_selected.ShortId}…");
-        try
-        {
-            var r = await LauncherService.LaunchAsync(acc, placeId, _selected.Id);
-            _main.SetStatus(r.Success ? $"Launched {acc.DisplayNameOrUser}." : r.Message);
-        }
-        catch (Exception ex)
-        {
-            _main.SetStatus($"Join failed: {ex.Message}");
-        }
-        finally
-        {
-            Busy = false;
-        }
-    }
-
-    private void CopyJobId()
-    {
-        if (_selected == null) return;
-        try { System.Windows.Clipboard.SetText(_selected.Id); _main.SetStatus("Job ID copied."); }
-        catch { _main.SetStatus("Could not access the clipboard."); }
+        _main.SetStatus(L.T("Launch.Launching", acc.DisplayNameOrUser));
+        var r = await LauncherService.LaunchAsync(acc, _placeId, server.Id);
+        _main.SetStatus(r.Success ? L.T("Status.Launched", acc.DisplayNameOrUser) : r.Message);
+        if (!r.Success) ToastService.Error(L.T("Launch.FailedTitle"), r.Message);
     }
 }

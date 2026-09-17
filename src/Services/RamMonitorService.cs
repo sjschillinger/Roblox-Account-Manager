@@ -94,10 +94,10 @@ public static class RamMonitorService
     public record TrimResult(int Clients, long FreedMb)
     {
         public string Summary => Clients == 0
-            ? "No tracked Roblox clients to trim."
+            ? L.T("Ram.Trim.None")
             : FreedMb > 0
-                ? $"Trimmed {Clients} client(s) — {FreedMb:N0} MB released back to Windows."
-                : $"Trimmed {Clients} client(s) — nothing to release right now.";
+                ? L.N("Ram.Trim.Freed", Clients, FreedMb.ToString("N0"))
+                : L.N("Ram.Trim.Nothing", Clients);
     }
 
     /// <summary>
@@ -169,8 +169,12 @@ public static class RamMonitorService
         try
         {
             using var p = Process.GetProcessById(pid);
+            if (!p.ProcessName.StartsWith("RobloxPlayer", StringComparison.OrdinalIgnoreCase)) { ProcessRegistry.Forget(pid); return; }
+            ProcessRegistry.MarkClosing(pid);
             p.Kill();
-            ProcessRegistry.Forget(pid);
+            DiagnosticsService.Warn("ram", $"Closed {alias}: {mb} MB is over the {limit} MB limit");
+            if (SettingsService.Current.EnableToasts)
+                ToastService.Warning(L.T("Toast.RamKill.Title"), L.T("Toast.RamKill.Body", alias, mb, limit));
             if (WebhookService.Configured)
                 WebhookService.Notify($"🧹 **{alias}** killed by RAM monitor ({mb} MB > {limit} MB).");
         }

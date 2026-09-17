@@ -1,0 +1,44 @@
+<UserControl x:Class="RobloxAccountManager.Views.Settings.HotkeysSettings"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:RobloxAccountManager.Controls"
+             xmlns:vm="clr-namespace:RobloxAccountManager.ViewModels">
+    <StackPanel>
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Hotkeys}" FontFamily="{StaticResource DisplayFont}" FontSize="18" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}" />
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Hotkeys.Desc}" Style="{StaticResource Text.Caption}" FontSize="13" Margin="0,4,0,22" />
+
+        <TextBlock Text="{DynamicResource Str.Hotkeys.Global}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}">
+            <ItemsControl ItemsSource="{Binding HotkeyRows}" Focusable="False">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><ctl:DividerStack /></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:HotkeyRow}">
+                        <Grid Margin="18,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding Label}" FontWeight="Medium" VerticalAlignment="Center" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <Button x:Name="chord" Grid.Column="1" Style="{StaticResource Btn.Secondary}" MinWidth="150" Margin="0,0,18,0"
+                                    FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                    Content="{Binding DisplayText}" ToolTip="{DynamicResource Str.Hotkeys.ClickToRecord}"
+                                    Click="Capture_Click" PreviewKeyDown="Capture_KeyDown" LostKeyboardFocus="Capture_LostFocus" />
+                            <CheckBox Grid.Column="2" Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" VerticalAlignment="Center" />
+                        </Grid>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding Capturing}" Value="True">
+                                <Setter TargetName="chord" Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+                                <Setter TargetName="chord" Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
+        <TextBlock Text="{DynamicResource Str.Hotkeys.Note}" Style="{StaticResource Text.Caption}" Margin="2,12,0,0" />
+    </StackPanel>
+</UserControl>

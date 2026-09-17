@@ -5,31 +5,55 @@ using RobloxAccountManager.Models;
 namespace RobloxAccountManager.Services;
 
 /// <summary>
-/// Writes FastFlags to <c>%LOCALAPPDATA%\Roblox\Versions\&lt;hash&gt;\ClientSettings\ClientAppSettings.json</c>.
-/// Convenience toggles in <see cref="AppSettings"/> expand into well-known flags; the user's
-/// raw <see cref="AppSettings.CustomFFlags"/> are merged last so they always win.
+/// Writes FastFlags into ClientAppSettings.json before a launch.
+///
+/// Since September 2025 the Roblox client only honours flags on an allowlist and silently ignores
+/// everything else. The convenience options therefore only ever produce allowlisted flags, and the
+/// custom-flag editor points out the ones Roblox will ignore instead of letting them look applied.
+/// The allowlist is Roblox's to change — it is kept here as data, and unknown flags are still
+/// written (a future allowlist may accept them), just flagged in the UI.
 /// </summary>
 public static class FFlagsService
 {
+    /// <summary>Roblox's published allowlist for local client configuration.</summary>
+    public static readonly HashSet<string> Allowlist = new(StringComparer.Ordinal)
+    {
+        // Geometry
+        "DFIntCSGLevelOfDetailSwitchingDistance",
+        "DFIntCSGLevelOfDetailSwitchingDistanceL12",
+        "DFIntCSGLevelOfDetailSwitchingDistanceL23",
+        "DFIntCSGLevelOfDetailSwitchingDistanceL34",
+        // Rendering
+        "FFlagHandleAltEnterFullscreenManually",
+        "DFFlagTextureQualityOverrideEnabled",
+        "DFIntTextureQualityOverride",
+        "FIntDebugForceMSAASamples",
+        "DFFlagDisableDPIScale",
+        "FFlagDebugGraphicsPreferD3D11",
+        "FFlagDebugSkyGray",
+        "DFFlagDebugPauseVoxelizer",
+        "DFIntDebugFRMQualityLevelOverride",
+        "FIntFRMMaxGrassDistance",
+        "FIntFRMMinGrassDistance",
+        "FFlagDebugGraphicsPreferVulkan",
+        "FFlagDebugGraphicsPreferOpenGL",
+        // User interface
+        "FIntGrassMovementReducedMotionFactor",
+    };
+
     /// <summary>
-    /// Everything the launch path needs to write before starting a client: the FPS cap from
-    /// "Unlock FPS", the FastFlag toggles, the user's raw flags, and finally this account's own
-    /// per-account overrides. Returns how many version folders were written (0 = nothing to do).
-    ///
-    /// This is what actually makes "Unlock FPS" work. It used to write a single
-    /// <c>%LOCALAPPDATA%\Roblox\ClientSettings\ClientAppSettings.json</c>, a path the modern
-    /// client does not read — the cap was silently ignored on every launch. The client reads
-    /// per-version settings, which is where <see cref="VersionFolders"/> points.
+    /// Everything a launch writes: the convenience options, the user's raw flags, then this account's
+    /// own overrides. Also applies the frame-rate cap to Roblox's settings file. Returns how many
+    /// flag files were written.
     /// </summary>
     public static int ApplyForLaunch(AppSettings s, Account? account = null)
     {
+        if (s.FpsCap > 0)
+        {
+            try { RobloxClientSettingsService.WriteFramerateCap(s.FpsCap); } catch { }
+        }
+
         var flags = s.ApplyFFlags ? BuildFlags(s) : new Dictionary<string, string>(StringComparer.Ordinal);
-
-        // "Unlock FPS" is its own toggle, independent of the FastFlags section, but both end up
-        // in the same file — merged here so enabling one never wipes the other's settings.
-        if (s.UnlockFps)
-            flags["DFIntTaskSchedulerTargetFps"] = s.MaxFps > 0 ? s.MaxFps.ToString() : "9999";
-
         foreach (var kv in ParseRaw(account?.FFlags))
             flags[kv.Key] = kv.Value;
 
@@ -37,9 +61,9 @@ public static class FFlagsService
     }
 
     /// <summary>
-    /// Parses a raw ClientAppSettings JSON blob (per-account overrides, or the custom-flags box)
-    /// into a flat string→string map. Non-string values are stringified so <c>{"X": true}</c> and
-    /// <c>{"X": "True"}</c> behave the same. Invalid JSON yields an empty map rather than throwing.
+    /// Parses a raw ClientAppSettings JSON blob into a flat string→string map. Non-string values are
+    /// stringified so <c>{"X": true}</c> and <c>{"X": "True"}</c> behave the same. Invalid JSON yields
+    /// an empty map rather than throwing — a half-typed blob must never block a launch.
     /// </summary>
     public static Dictionary<string, string> ParseRaw(string? json)
     {
@@ -47,7 +71,7 @@ public static class FFlagsService
         if (string.IsNullOrWhiteSpace(json)) return map;
         try
         {
-            using var doc = JsonDocument.Parse(json);
+            using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
             if (doc.RootElement.ValueKind != JsonValueKind.Object) return map;
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
@@ -62,31 +86,29 @@ public static class FFlagsService
                 };
             }
         }
-        catch { /* a half-typed flag blob must never block a launch */ }
+        catch { }
         return map;
     }
 
-    /// <summary>True when the text parses as a flag object (drives the editor's validity hint).</summary>
     public static bool IsValidRaw(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return true;
         try
         {
-            using var doc = JsonDocument.Parse(json);
+            using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
             return doc.RootElement.ValueKind == JsonValueKind.Object;
         }
         catch { return false; }
     }
 
+    /// <summary>Flags in <paramref name="flags"/> the current client will ignore.</summary>
+    public static List<string> NotAllowlisted(IEnumerable<string> flags)
+        => flags.Where(f => !Allowlist.Contains(f)).Distinct().OrderBy(f => f, StringComparer.Ordinal).ToList();
+
     /// <summary>
-    /// Writes the flags into every ClientSettings folder that the installed client(s) actually
-    /// read — which, on a machine running a bootstrapper such as Bloxstrap or Froststrap, is the
-    /// launcher's own managed file rather than a version folder. See
-    /// <see cref="RobloxInstallService.FlagTargetDirectories"/>.
-    ///
-    /// Existing flags are <em>merged</em>, not replaced. A bootstrapper's settings file is the
-    /// user's own configuration; overwriting it wholesale would silently wipe every flag they
-    /// had set there. Ours win on a key collision, theirs survive otherwise.
+    /// Writes the flags into every ClientSettings folder the installed client(s) read — for a
+    /// bootstrapper (Bloxstrap, Fishstrap…) that is its own managed file. Existing flags are merged,
+    /// not replaced: a bootstrapper's file is the user's configuration.
     /// </summary>
     private static int Write(Dictionary<string, string> flags)
     {
@@ -104,11 +126,15 @@ public static class FFlagsService
                         merged[kv.Key] = kv.Value;
                 foreach (var kv in flags) merged[kv.Key] = kv.Value;
 
-                File.WriteAllText(file,
-                    JsonSerializer.Serialize(merged, new JsonSerializerOptions { WriteIndented = true }));
+                string tmp = file + ".tmp";
+                File.WriteAllText(tmp, JsonSerializer.Serialize(merged, new JsonSerializerOptions { WriteIndented = true }));
+                File.Move(tmp, file, overwrite: true);
                 written++;
             }
-            catch { /* a locked/permission-denied folder shouldn't block the rest */ }
+            catch (Exception ex)
+            {
+                DiagnosticsService.Warn("fflags", $"Could not write flags into {csDir}", ex);
+            }
         }
         return written;
     }
@@ -129,41 +155,45 @@ public static class FFlagsService
         return cleared;
     }
 
-    /// <summary>Expands toggles + custom flags into the final string→string map Roblox expects.</summary>
+    /// <summary>Expands the convenience options plus the custom flags into the map Roblox expects.</summary>
     public static Dictionary<string, string> BuildFlags(AppSettings s)
     {
         var flags = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        if (s.FFlagUnlockFps)
+        switch (s.GraphicsApi)
         {
-            // The scheduler cap is what actually gates FPS; 0 = uncapped, then set a high target.
-            flags["DFIntTaskSchedulerTargetFps"] = s.MaxFps > 0 ? s.MaxFps.ToString() : "9999";
-            flags["FFlagDebugGraphicsDisableDirect3D11"] = "False";
-        }
-        if (s.FFlagDisableVoiceChat)
-        {
-            flags["FFlagDisableVoiceChat"] = "True";
-            flags["FFlagEnableVoiceChatSpatialAudio"] = "False";
-        }
-        if (s.FFlagDisableTelemetry)
-        {
-            flags["FFlagDebugDisableTelemetryEphemeralCounter"] = "True";
-            flags["FFlagDebugDisableTelemetryEventIngest"] = "True";
-            flags["FFlagDebugDisableTelemetryPoint"] = "True";
-            flags["FFlagDebugDisableTelemetryV2Counter"] = "True";
-        }
-        if (s.FFlagLightingTechVoxel)
-        {
-            flags["FFlagDebugForceFutureIsBrightPhase3"] = "False";
-            flags["DFFlagDebugRenderForceTechnologyVoxel"] = "True";
+            case "D3D11": flags["FFlagDebugGraphicsPreferD3D11"] = "True"; break;
+            case "Vulkan": flags["FFlagDebugGraphicsPreferVulkan"] = "True"; break;
+            case "OpenGL": flags["FFlagDebugGraphicsPreferOpenGL"] = "True"; break;
         }
 
-        // Raw user flags win over the convenience toggles.
+        if (s.MsaaSamples is 0 or 1 or 2 or 4 or 8)
+            flags["FIntDebugForceMSAASamples"] = s.MsaaSamples.ToString();
+
+        if (s.TextureQuality is >= 0 and <= 3)
+        {
+            flags["DFFlagTextureQualityOverrideEnabled"] = "True";
+            flags["DFIntTextureQualityOverride"] = s.TextureQuality.ToString();
+        }
+
+        if (s.QualityLevelOverride is >= 1 and <= 21)
+            flags["DFIntDebugFRMQualityLevelOverride"] = s.QualityLevelOverride.ToString();
+
+        if (s.DisableDpiScale) flags["DFFlagDisableDPIScale"] = "True";
+        if (s.GraySky) flags["FFlagDebugSkyGray"] = "True";
+        if (s.PauseVoxelizer) flags["DFFlagDebugPauseVoxelizer"] = "True";
+        if (s.AltEnterFullscreen) flags["FFlagHandleAltEnterFullscreenManually"] = "False";
+        if (s.HideGrass)
+        {
+            flags["FIntFRMMinGrassDistance"] = "0";
+            flags["FIntFRMMaxGrassDistance"] = "0";
+        }
+
+        // Raw user flags win over the convenience options.
         foreach (var kv in s.CustomFFlags)
             if (!string.IsNullOrWhiteSpace(kv.Key))
                 flags[kv.Key.Trim()] = kv.Value ?? "";
 
         return flags;
     }
-
 }

@@ -3,6 +3,8 @@ using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using RobloxAccountManager.Models;
+using RobloxAccountManager.Services;
 
 namespace RobloxAccountManager.Mvvm;
 
@@ -41,19 +43,28 @@ public class HexToBrush : IValueConverter
 {
     public object Convert(object value, Type t, object p, CultureInfo c)
     {
-        try { return new SolidColorBrush((Color)ColorConverter.ConvertFromString((string)value)); }
-        catch { return Brushes.Transparent; }
+        try
+        {
+            if (value is string s && s.Length > 0)
+            {
+                var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s));
+                brush.Freeze();
+                return brush;
+            }
+        }
+        catch { }
+        return Brushes.Transparent;
     }
     public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
 }
 
 public class CountToVis : IValueConverter
 {
-    // Visible when count == 0 (for empty-state overlays)
+    /// <summary>Visible when count == 0 (empty states) — or when count &gt; 0 with WhenZero=false.</summary>
     public bool WhenZero { get; set; } = true;
     public object Convert(object value, Type t, object p, CultureInfo c)
     {
-        int n = value is int i ? i : 0;
+        long n = value switch { int i => i, long l => l, _ => 0 };
         bool show = WhenZero ? n == 0 : n > 0;
         return show ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -62,14 +73,17 @@ public class CountToVis : IValueConverter
 
 public class UrlToImage : IValueConverter
 {
-    // Decode small (avatars/icons render tiny) and cache per URL so scrolling / re-render never
-    // re-downloads or re-decodes. Frozen images are shareable and cheap for the GC.
+    // Decode small (avatars and icons render tiny) and cache per URL, so scrolling and re-templating
+    // never re-download or re-decode.
     private static readonly Dictionary<string, BitmapImage> Cache = new();
     private const int DecodeWidth = 160;
 
     public object? Convert(object value, Type t, object p, CultureInfo c)
     {
         if (value is not string url || string.IsNullOrEmpty(url)) return null;
+        // Only ever load images over HTTPS from Roblox's CDNs — a malformed or hostile value in a
+        // settings file must not turn into an arbitrary file:// or UNC read.
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return null;
         if (Cache.TryGetValue(url, out var cached)) return cached;
         try
         {
@@ -78,10 +92,10 @@ public class UrlToImage : IValueConverter
             bmp.CacheOption = BitmapCacheOption.OnLoad;
             bmp.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
             bmp.DecodePixelWidth = DecodeWidth;
-            bmp.UriSource = new Uri(url);
+            bmp.UriSource = uri;
             bmp.EndInit();
             if (bmp.CanFreeze) bmp.Freeze();
-            if (Cache.Count > 512) Cache.Clear();   // simple bound
+            if (Cache.Count > 512) Cache.Clear();
             Cache[url] = bmp;
             return bmp;
         }
@@ -101,31 +115,35 @@ public class IconKeyConverter : IValueConverter
     public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
 }
 
-/// <summary>Visible when the bound int equals the ConverterParameter int.</summary>
-public class IndexToVis : IValueConverter
+/// <summary>Visible when the bound value's text equals the ConverterParameter (Invert flips it).</summary>
+public class EqualsToVis : IValueConverter
 {
+    public bool Invert { get; set; }
     public object Convert(object value, Type t, object p, CultureInfo c)
     {
-        int v = value is int i ? i : -1;
-        int target = p != null && int.TryParse(p.ToString(), out var tp) ? tp : -2;
-        return v == target ? Visibility.Visible : Visibility.Collapsed;
+        bool eq = string.Equals(value?.ToString(), p?.ToString(), StringComparison.OrdinalIgnoreCase);
+        if (Invert) eq = !eq;
+        return eq ? Visibility.Visible : Visibility.Collapsed;
     }
     public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
 }
 
-/// <summary>True when the bound int equals the ConverterParameter int (for nav highlight).</summary>
-public class IndexToBool : IValueConverter
+/// <summary>Two-way bridge for radio-style choices: IsChecked is true when value == parameter,
+/// and checking it writes the parameter back.</summary>
+public class EqualsToBool : IValueConverter
 {
     public object Convert(object value, Type t, object p, CultureInfo c)
+        => string.Equals(value?.ToString(), p?.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    public object ConvertBack(object value, Type t, object p, CultureInfo c)
     {
-        int v = value is int i ? i : -1;
-        int target = p != null && int.TryParse(p.ToString(), out var tp) ? tp : -2;
-        return v == target;
+        if (value is not true || p == null) return Binding.DoNothing;
+        if (t == typeof(int) && int.TryParse(p.ToString(), out int i)) return i;
+        return p.ToString()!;
     }
-    public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
 }
 
-/// <summary>MultiBinding [string text, bool mask] -> masked string when mask is true.</summary>
+/// <summary>MultiBinding [string text, bool mask] -> bullets when mask is true.</summary>
 public class MaskConverter : IMultiValueConverter
 {
     public object Convert(object[] values, Type t, object p, CultureInfo c)
@@ -138,7 +156,7 @@ public class MaskConverter : IMultiValueConverter
     public object[] ConvertBack(object v, Type[] t, object p, CultureInfo c) => Array.Empty<object>();
 }
 
-/// <summary>Counts how many accounts in a group's Items are currently online (any non-offline presence).</summary>
+/// <summary>Counts accounts in a group that are online in any form; parameter "vis" drives a badge's Visibility.</summary>
 public class GroupOnlineCount : IValueConverter
 {
     public object Convert(object value, Type t, object p, CultureInfo c)
@@ -146,10 +164,7 @@ public class GroupOnlineCount : IValueConverter
         int n = 0;
         if (value is System.Collections.IEnumerable items)
             foreach (var o in items)
-                if (o is RobloxAccountManager.Models.Account a &&
-                    a.Presence is "Online" or "In Game" or "In Studio") n++;
-        // With ConverterParameter="vis" the same converter drives the badge's Visibility,
-        // so the header can hide the whole pill when nobody in the group is online.
+                if (o is Account a && PresenceStatus.IsOnline(a.Presence)) n++;
         if (p is string s && s == "vis")
             return n > 0 ? Visibility.Visible : Visibility.Collapsed;
         return n;
@@ -157,14 +172,58 @@ public class GroupOnlineCount : IValueConverter
     public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
 }
 
-/// <summary>Multiplies a 0..1 fill value by the bound bar width (passed as parameter).</summary>
+/// <summary>Multiplies a 0..1 fill value by the bar width passed as parameter.</summary>
 public class FillToWidth : IValueConverter
 {
     public object Convert(object value, Type t, object p, CultureInfo c)
     {
         double fill = value is double d ? d : 0;
         double max = p != null && double.TryParse(p.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var m) ? m : 60;
-        return fill * max;
+        return Math.Clamp(fill, 0, 1) * max;
+    }
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
+}
+
+/// <summary>Canonical presence → theme brush (the brush recolours itself on a theme switch).</summary>
+public class PresenceToBrush : IValueConverter
+{
+    public object Convert(object value, Type t, object p, CultureInfo c)
+        => ThemeService.BrushFor(PresenceStatus.PaletteKey(value as string));
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
+}
+
+/// <summary>Canonical presence → localized label.</summary>
+public class PresenceToText : IValueConverter
+{
+    public object Convert(object value, Type t, object p, CultureInfo c) => PresenceStatus.Label(value as string);
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
+}
+
+/// <summary>Localizes a value by prefixing it: ConverterParameter "Mode." + "Dark" → L.T("Mode.Dark").</summary>
+public class LocalizeKey : IValueConverter
+{
+    public object Convert(object value, Type t, object p, CultureInfo c)
+    {
+        string key = (p as string ?? "") + (value?.ToString() ?? "");
+        return L.T(key);
+    }
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
+}
+
+/// <summary>Palette key name → live brush ("Success" → SuccessBrush).</summary>
+public class KeyToBrush : IValueConverter
+{
+    public object Convert(object value, Type t, object p, CultureInfo c) => ThemeService.BrushFor(value as string ?? "TextMuted");
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
+}
+
+/// <summary>Greater-than-zero test for numbers (badges, counters).</summary>
+public class PositiveToVis : IValueConverter
+{
+    public object Convert(object value, Type t, object p, CultureInfo c)
+    {
+        double n = value switch { int i => i, long l => l, double d => d, _ => 0 };
+        return n > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
     public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
 }

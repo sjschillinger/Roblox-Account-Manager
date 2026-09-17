@@ -37,15 +37,16 @@ public static class CookieHealthService
 
                 if (id != null)
                 {
-                    acc.IsValid = true;
+                    acc.MarkValidated(true);
 
                     // Backfill identity fields when we learn them and they were blank.
                     if (acc.UserId == 0) acc.UserId = id.Id;
                     if (string.IsNullOrWhiteSpace(acc.Username)) acc.Username = id.Name;
+                    if (string.IsNullOrWhiteSpace(acc.DisplayName)) acc.DisplayName = id.DisplayName;
                 }
                 else if (rejected)
                 {
-                    acc.IsValid = false;
+                    acc.MarkValidated(false);
                     Interlocked.Increment(ref invalid);
                 }
                 // else: inconclusive — keep whatever IsValid already said.
@@ -53,7 +54,7 @@ public static class CookieHealthService
             catch { /* transient network failure — keep prior IsValid */ }
             finally
             {
-                progress?.Report($"Validated {Interlocked.Increment(ref done)}/{list.Count}…");
+                progress?.Report(L.T("Health.Progress", Interlocked.Increment(ref done), list.Count));
                 gate.Release();
             }
         });

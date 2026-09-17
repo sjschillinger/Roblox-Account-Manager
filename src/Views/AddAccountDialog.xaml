@@ -1,131 +1,138 @@
 <Window x:Class="RobloxAccountManager.Views.AddAccountDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:ram="clr-namespace:RobloxAccountManager"
+        xmlns:ctl="clr-namespace:RobloxAccountManager.Controls"
         Icon="pack://application:,,,/Assets/app.ico"
+        Title="{DynamicResource Str.Add.Title}"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
-        Width="500" SizeToContent="Height" ShowInTaskbar="False">
-    <Border x:Name="Root" Margin="18" CornerRadius="{StaticResource RadiusLg}"
-            Background="{DynamicResource SurfaceBrush}"
+        Width="544" SizeToContent="Height" ShowInTaskbar="False"
+        FontFamily="{StaticResource UiFont}" UseLayoutRounding="True">
+    <Border x:Name="Root" Margin="22" CornerRadius="{StaticResource RadiusLg}"
+            Background="{DynamicResource ElevatedBrush}"
             BorderBrush="{DynamicResource HairlineStrongBrush}" BorderThickness="1"
-            Effect="{StaticResource ShadowSoft}" RenderTransformOrigin="0.5,0.5"
+            Effect="{StaticResource ShadowDialog}"
             TextElement.Foreground="{DynamicResource TextPrimaryBrush}">
-        <Border.RenderTransform>
-            <ScaleTransform x:Name="RootScale" ScaleX="1" ScaleY="1" />
-        </Border.RenderTransform>
-        <Grid Margin="24">
+        <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,4">
-                <Border Width="34" Height="34" CornerRadius="9" Background="{DynamicResource AccentSoftBrush}">
-                    <Path Data="{StaticResource Icon.Plus}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="1.9"
-                          Width="16" Height="16" Stretch="Uniform" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
-                </Border>
-                <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                    <TextBlock Text="Add account" Style="{StaticResource DisplayText}" FontSize="16" />
+            <!-- Header -->
+            <Grid Margin="24,20,16,0" Background="Transparent" MouseLeftButtonDown="Header_MouseDown">
+                <StackPanel Margin="0,2,40,0">
+                    <TextBlock Text="{DynamicResource Str.Add.Title}" FontFamily="{StaticResource DisplayFont}" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock Text="{DynamicResource Str.Add.Subtitle}" Style="{StaticResource Text.Caption}" FontSize="12.5" Margin="0,4,0,0" />
                 </StackPanel>
+                <Button x:Name="CloseBtn" Style="{StaticResource Btn.Icon}" ctl:Ui.Icon="{StaticResource Icon.Close}" HorizontalAlignment="Right"
+                        VerticalAlignment="Top" Width="30" Height="30" Click="Cancel_Click" ToolTip="{DynamicResource Str.Common.Close}" />
+            </Grid>
+
+            <StackPanel Grid.Row="1" Margin="24,18,24,20">
+                <!-- Method -->
+                <Border Style="{StaticResource Segmented}" HorizontalAlignment="Left">
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="BrowserTab" GroupName="method" Style="{StaticResource Segment}" ctl:Ui.Icon="{StaticResource Icon.Browser}"
+                                     Content="{DynamicResource Str.Add.Tab.Browser}" Checked="Tab_Checked" />
+                        <RadioButton x:Name="PasswordTab" GroupName="method" Style="{StaticResource Segment}" ctl:Ui.Icon="{StaticResource Icon.Key}"
+                                     Content="{DynamicResource Str.Add.Tab.Password}" Checked="Tab_Checked" />
+                        <RadioButton x:Name="CookieTab" GroupName="method" Style="{StaticResource Segment}" ctl:Ui.Icon="{StaticResource Icon.Code}"
+                                     Content="{DynamicResource Str.Add.Tab.Cookie}" Checked="Tab_Checked" />
+                    </StackPanel>
+                </Border>
+
+                <Grid Margin="0,18,0,0">
+                    <!-- Browser sign-in -->
+                    <StackPanel x:Name="BrowserPanel">
+                        <TextBlock Text="{DynamicResource Str.Add.Browser.Body}" Style="{StaticResource Text.Secondary}" LineHeight="19" />
+                        <Border Style="{StaticResource Panel.Inset}" Margin="0,14,0,0" Padding="14,12">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <Path Data="{StaticResource Icon.ShieldCheck}" Style="{StaticResource IconPath}" Stroke="{DynamicResource SuccessBrush}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,2,0,0" />
+                                    <TextBlock Grid.Column="1" Text="{DynamicResource Str.Add.Browser.Point1}" Style="{StaticResource Text.Secondary}" Margin="10,0,0,0" />
+                                </Grid>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <Path Data="{StaticResource Icon.Lock}" Style="{StaticResource IconPath}" Stroke="{DynamicResource SuccessBrush}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,2,0,0" />
+                                    <TextBlock Grid.Column="1" Text="{DynamicResource Str.Add.Browser.Point2}" Style="{StaticResource Text.Secondary}" Margin="10,0,0,0" />
+                                </Grid>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <Path Data="{StaticResource Icon.Trash}" Style="{StaticResource IconPath}" Stroke="{DynamicResource SuccessBrush}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,2,0,0" />
+                                    <TextBlock Grid.Column="1" Text="{DynamicResource Str.Add.Browser.Point3}" Style="{StaticResource Text.Secondary}" Margin="10,0,0,0" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock x:Name="BrowserInfo" Style="{StaticResource Text.Caption}" Margin="2,10,0,0" />
+                    </StackPanel>
+
+                    <!-- Username + password -->
+                    <StackPanel x:Name="PasswordPanel" Visibility="Collapsed">
+                        <TextBlock Text="{DynamicResource Str.Add.Password.Body}" Style="{StaticResource Text.Secondary}" LineHeight="19" Margin="0,0,0,14" />
+                        <TextBlock Text="{DynamicResource Str.Add.Username}" Style="{StaticResource Text.Label}" />
+                        <TextBox x:Name="UserBox" TextChanged="Input_Changed" />
+                        <TextBlock Text="{DynamicResource Str.Add.Password}" Style="{StaticResource Text.Label}" Margin="0,12,0,6" />
+                        <PasswordBox x:Name="PassBox" PasswordChanged="Password_Changed" />
+                        <StackPanel x:Name="TwoFactorPanel" Visibility="Collapsed" Margin="0,12,0,0">
+                            <TextBlock x:Name="TwoFactorLabel" Style="{StaticResource Text.Label}" />
+                            <TextBox x:Name="CodeBox" FontFamily="{StaticResource MonoFont}" FontSize="15" MaxLength="8" Width="160"
+                                     HorizontalAlignment="Left" TextChanged="Input_Changed" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Cookie -->
+                    <StackPanel x:Name="CookiePanel" Visibility="Collapsed">
+                        <TextBlock Text="{DynamicResource Str.Add.Cookie.Body}" Style="{StaticResource Text.Secondary}" LineHeight="19" Margin="0,0,0,14" />
+                        <Grid>
+                            <TextBox x:Name="CookieBox" Style="{StaticResource Input.Code}" Height="112" TextWrapping="Wrap"
+                                     HorizontalScrollBarVisibility="Disabled" AcceptsReturn="False" AcceptsTab="False"
+                                     ctl:Ui.Placeholder="_|WARNING:-DO-NOT-SHARE-THIS…" TextChanged="Input_Changed" />
+                            <Button x:Name="PasteBtn" Style="{StaticResource Btn.Secondary}" Height="28" Padding="10,0" Margin="0,0,8,8"
+                                    HorizontalAlignment="Right" VerticalAlignment="Bottom" ctl:Ui.Icon="{StaticResource Icon.Copy}"
+                                    Content="{DynamicResource Str.Common.Paste}" Click="Paste_Click" />
+                        </Grid>
+                    </StackPanel>
+                </Grid>
+
+                <!-- Status -->
+                <Border x:Name="StatusBar" Visibility="Collapsed" Margin="0,16,0,0" CornerRadius="{StaticResource RadiusMd}" Padding="12,10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Path x:Name="StatusIcon" Style="{StaticResource IconPath}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,10,0"
+                              RenderTransformOrigin="0.5,0.5">
+                            <Path.RenderTransform>
+                                <RotateTransform x:Name="StatusSpin" />
+                            </Path.RenderTransform>
+                        </Path>
+                        <TextBlock x:Name="StatusText" Grid.Column="1" TextWrapping="Wrap" LineHeight="18" />
+                    </Grid>
+                </Border>
             </StackPanel>
 
-            <!-- How the account gets in: sign in, or paste a cookie the user already has. -->
-            <Border Grid.Row="1" Margin="0,14,0,0" CornerRadius="{StaticResource RadiusMd}" Padding="3"
-                    Background="{DynamicResource SurfaceAltBrush}"
-                    BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1">
+            <!-- Footer -->
+            <Border Grid.Row="2" Background="{DynamicResource SurfaceAltBrush}" CornerRadius="0,0,11,11"
+                    BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="24,14">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <Button x:Name="SignInTab" Grid.Column="0" Height="32" Content="Sign in"
-                            Style="{StaticResource PrimaryButton}" Click="SignInTab_Click" />
-                    <Button x:Name="CookieTab" Grid.Column="1" Height="32" Content="Paste cookie"
-                            Style="{StaticResource GhostButton}" Click="CookieTab_Click" />
-                </Grid>
-            </Border>
-
-            <TextBlock Grid.Row="2" x:Name="ModeHint" Style="{StaticResource Label}" TextWrapping="Wrap"
-                       Margin="0,12,0,14"
-                       Text="Sign in with the account's Roblox username and password. The session is fetched automatically — you never have to find a cookie yourself." />
-
-            <Grid Grid.Row="3">
-                <!-- Sign in with credentials -->
-                <StackPanel x:Name="SignInPanel">
-                    <TextBlock Text="Roblox username" Style="{StaticResource Label}" Margin="0,0,0,6" />
-                    <TextBox x:Name="UserBox" TextChanged="Credentials_Changed" />
-
-                    <TextBlock Text="Password" Style="{StaticResource Label}" Margin="0,12,0,6" />
-                    <PasswordBox x:Name="PassBox" PasswordChanged="Password_Changed" />
-
-                    <!-- Shown only once Roblox asks for a two-step code. -->
-                    <StackPanel x:Name="TwoFactorPanel" Visibility="Collapsed">
-                        <TextBlock x:Name="TwoFactorLabel" Text="Verification code" Style="{StaticResource Label}"
-                                   Margin="0,12,0,6" TextWrapping="Wrap" />
-                        <TextBox x:Name="CodeBox" MaxLength="8" FontFamily="{StaticResource MonoFont}"
-                                 TextChanged="Credentials_Changed" />
+                    <TextBlock x:Name="FooterNote" Style="{StaticResource Text.Caption}" VerticalAlignment="Center" Margin="0,0,12,0"
+                               Text="{DynamicResource Str.Add.Footer}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                               ToolTip="{DynamicResource Str.Add.Footer}" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button x:Name="CancelBtn" Style="{StaticResource Btn.Secondary}" MinWidth="92" Margin="0,0,8,0"
+                                Content="{DynamicResource Str.Common.Cancel}" Click="Cancel_Click" />
+                        <Button x:Name="ActionBtn" Style="{StaticResource Btn.Primary}" MinWidth="120" Click="Action_Click" IsDefault="True" />
                     </StackPanel>
-
-                    <TextBlock Margin="0,12,0,0" FontSize="11.5" TextWrapping="Wrap"
-                               Foreground="{DynamicResource TextMutedBrush}"
-                               Text="The password is sent only to Roblox's own login endpoint and is never saved, logged or reused. Only the session cookie Roblox returns is stored." />
-
-                    <Button x:Name="BrowserBtn" Style="{StaticResource GhostButton}" Height="32" Margin="0,12,0,0"
-                            HorizontalAlignment="Left" Padding="12,0" Click="BrowserLogin_Click"
-                            Content="Sign in in a browser window instead"
-                            ToolTip="Opens the real Roblox login page in a throw-away browser profile and picks the session up automatically. Use this when Roblox asks for a captcha." />
-                </StackPanel>
-
-                <!-- Paste an existing cookie -->
-                <Grid x:Name="CookiePanel" Visibility="Collapsed">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <Grid Grid.Row="0" Margin="0,0,0,6">
-                        <TextBlock Text="Cookie" Style="{StaticResource Label}" VerticalAlignment="Center" />
-                        <Button x:Name="PasteBtn" HorizontalAlignment="Right" Style="{StaticResource IconButton}"
-                                Width="Auto" Height="26" Padding="8,0" Click="Paste_Click" ToolTip="Paste from clipboard">
-                            <StackPanel Orientation="Horizontal">
-                                <Path Data="{StaticResource Icon.Copy}" Style="{StaticResource IconPath}" Width="13" Height="13" />
-                                <TextBlock Text="Paste" Margin="6,0,0,0" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
-                            </StackPanel>
-                        </Button>
-                    </Grid>
-                    <Border Grid.Row="1" CornerRadius="{StaticResource RadiusMd}" Height="104"
-                            Background="{DynamicResource SurfaceAltBrush}"
-                            BorderBrush="{DynamicResource HairlineStrongBrush}" BorderThickness="1">
-                        <TextBox x:Name="CookieBox" Background="Transparent" BorderThickness="0"
-                                 AcceptsReturn="True" TextWrapping="Wrap" Height="102"
-                                 VerticalContentAlignment="Top" Padding="12,9"
-                                 VerticalScrollBarVisibility="Auto" FontFamily="{StaticResource MonoFont}"
-                                 FontSize="12" TextChanged="Cookie_Changed" />
-                    </Border>
                 </Grid>
-            </Grid>
-
-            <!-- status line -->
-            <Border Grid.Row="4" x:Name="StatusBar" Margin="0,12,0,0" CornerRadius="{StaticResource RadiusSm}"
-                    Padding="10,8" Visibility="Collapsed">
-                <StackPanel Orientation="Horizontal">
-                    <Path x:Name="StatusIcon" Width="15" Height="15" Stretch="Uniform" StrokeThickness="1.8"
-                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" VerticalAlignment="Center" />
-                    <TextBlock x:Name="StatusText" Margin="9,0,0,0" FontSize="12.5" VerticalAlignment="Center"
-                               TextWrapping="Wrap" />
-                </StackPanel>
             </Border>
-
-            <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
-                <Button x:Name="CancelBtn" Style="{StaticResource GhostButton}" Content="Cancel"
-                        Width="104" Margin="0,0,10,0" Click="Cancel_Click" />
-                <Button x:Name="AddBtn" Style="{StaticResource PrimaryButton}" Content="Sign in"
-                        Width="140" Click="Add_Click" IsDefault="True" />
-            </StackPanel>
         </Grid>
     </Border>
 
@@ -133,16 +140,7 @@
         <EventTrigger RoutedEvent="Window.Loaded">
             <BeginStoryboard>
                 <Storyboard>
-                    <DoubleAnimation Storyboard.TargetName="Root" Storyboard.TargetProperty="Opacity"
-                                     From="0" To="1" Duration="0:0:0.18" />
-                    <DoubleAnimation Storyboard.TargetName="RootScale" Storyboard.TargetProperty="ScaleX"
-                                     From="0.96" To="1" Duration="0:0:0.22">
-                        <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
-                    </DoubleAnimation>
-                    <DoubleAnimation Storyboard.TargetName="RootScale" Storyboard.TargetProperty="ScaleY"
-                                     From="0.96" To="1" Duration="0:0:0.22">
-                        <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
-                    </DoubleAnimation>
+                    <DoubleAnimation Storyboard.TargetName="Root" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.12" />
                 </Storyboard>
             </BeginStoryboard>
         </EventTrigger>

@@ -1,5 +1,8 @@
-using System.Collections;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
+using System.Windows.Data;
+using System.Windows.Threading;
 using RobloxAccountManager.Models;
 using RobloxAccountManager.Mvvm;
 using RobloxAccountManager.Services;
@@ -10,62 +13,781 @@ public class AccountsViewModel : ObservableObject
 {
     private readonly AccountStore _store;
     private readonly MainViewModel _main;
+    private readonly DispatcherTimer _filterDebounce;
 
     public AccountStore Store => _store;
+
+    /// <summary>The list as shown: filtered, sorted and (optionally) grouped.</summary>
+    public ListCollectionView AccountsView { get; }
+
+    public static readonly string[] StatusFilters = { "All", "Online", "InGame", "Offline", "Attention", "Favorites" };
+    public static readonly string[] SortModes = { "Name", "Status", "Recent", "Robux", "Playtime" };
+
+    public AccountsViewModel(AccountStore store, MainViewModel main)
+    {
+        _store = store;
+        _main = main;
+
+        AccountsView = new ListCollectionView(_store.Accounts)
+        {
+            IsLiveFiltering = true,
+            IsLiveSorting = true,
+            IsLiveGrouping = true,
+        };
+        foreach (var p in new[] { nameof(Account.Presence), nameof(Account.NeedsAttention), nameof(Account.IsFavorite), nameof(Account.Group) })
+            AccountsView.LiveFilteringProperties.Add(p);
+        foreach (var p in new[] { nameof(Account.Presence), nameof(Account.IsFavorite), nameof(Account.Group), nameof(Account.DisplayNameOrUser), nameof(Account.Robux) })
+            AccountsView.LiveSortingProperties.Add(p);
+        AccountsView.LiveGroupingProperties.Add(nameof(Account.Group));
+        AccountsView.Filter = FilterAccount;
+
+        _sortMode = SortModes.Contains(SettingsService.Current.AccountSort) ? SettingsService.Current.AccountSort : "Name";
+        _groupAccounts = SettingsService.Current.GroupAccounts;
+        ApplySortAndGrouping();
+
+        _filterDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        _filterDebounce.Tick += (_, _) => { _filterDebounce.Stop(); RefreshView(); };
+
+        // Custom sorting is not re-applied live, so an order that depends on presence or on the set of
+        // groups is re-applied shortly after those change (batched: a presence poll touches every row).
+        _reshape = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+        _reshape.Tick += (_, _) => { _reshape.Stop(); ApplySortAndGrouping(); };
+
+        _store.Accounts.CollectionChanged += (_, e) =>
+        {
+            if (e.NewItems != null) foreach (Account a in e.NewItems) a.PropertyChanged += OnAccountChanged;
+            if (e.OldItems != null) foreach (Account a in e.OldItems) a.PropertyChanged -= OnAccountChanged;
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+                foreach (var a in _store.Accounts) { a.PropertyChanged -= OnAccountChanged; a.PropertyChanged += OnAccountChanged; }
+            if (_selected != null && !_store.Accounts.Contains(_selected)) Selected = null;
+            RaiseCounts();
+            QueueReshape();
+        };
+
+        PlaceIdText = SettingsService.Current.DefaultPlaceId > 0 ? SettingsService.Current.DefaultPlaceId.ToString() : "";
+        foreach (var p in SettingsService.Current.SavedPlaces) SavedPlaces.Add(p);
+
+        AddCommand = new AsyncRelayCommand(_ => AddAsync(0));
+        ImportCommand = new AsyncRelayCommand(ImportAsync);
+        ImportIc3w0lfCommand = new AsyncRelayCommand(ImportIc3w0lfAsync);
+        ExportCommand = new RelayCommand(_ => Export());
+        FindDuplicatesCommand = new RelayCommand(_ => FindDuplicates());
+        RefreshAllCommand = new AsyncRelayCommand(RefreshAllAsync);
+
+        LaunchCommand = new AsyncRelayCommand(_ => LaunchAsync());
+        ShuffleJoinCommand = new AsyncRelayCommand(_ => ShuffleJoinAsync());
+        PingJoinCommand = new AsyncRelayCommand(_ => PingJoinAsync());
+        ServerHopCommand = new AsyncRelayCommand(_ => ServerHopAsync());
+        SquadJoinCommand = new AsyncRelayCommand(_ => SquadJoinAsync());
+        FollowCommand = new AsyncRelayCommand(_ => FollowAsync());
+        BrowseServersCommand = new RelayCommand(_ => BrowseServers());
+
+        RemoveCommand = new RelayCommand(_ => Remove());
+        CopyCookieCommand = new RelayCommand(_ => CopyCookie());
+        CopyUserIdCommand = new RelayCommand(_ => CopyUserId());
+        ToggleFavoriteCommand = new RelayCommand(p => ToggleFavorite(p as Account ?? _selected));
+        SetGroupCommand = new RelayCommand(_ => SetGroupForTargets());
+        SetColorCommand = new RelayCommand(p => SetColor(p as string));
+        OpenBrowserCommand = new AsyncRelayCommand(_ => OpenBrowserAsync());
+        OpenProfileCommand = new RelayCommand(_ => { if (_selected != null) BrowserService.OpenProfile(_selected); });
+        OpenAppCommand = new AsyncRelayCommand(_ => OpenAppAsync());
+        InjectScriptCommand = new AsyncRelayCommand(_ => InjectScriptAsync());
+        ValidateSelectedCommand = new AsyncRelayCommand(_ => ValidateSelectedAsync());
+        SignInAgainCommand = new AsyncRelayCommand(_ => AddAsync(0));
+        TestAccountProxyCommand = new AsyncRelayCommand(_ => TestAccountProxyAsync());
+
+        SavePlaceCommand = new RelayCommand(_ => SavePlace());
+        RemovePlaceCommand = new RelayCommand(p => RemovePlace(p as SavedPlace));
+        ApplySavedPlaceCommand = new RelayCommand(p => ApplySavedPlace(p as SavedPlace));
+        CopyTotpCommand = new RelayCommand(_ => CopyTotp());
+
+        ClearChecksCommand = new RelayCommand(_ => { foreach (var a in _store.Accounts) a.IsChecked = false; });
+        CheckAllVisibleCommand = new RelayCommand(_ => { foreach (var a in AccountsView.OfType<Account>()) a.IsChecked = true; });
+        ClearFiltersCommand = new RelayCommand(_ => { SearchText = ""; StatusFilter = "All"; GroupFilter = null; });
+        SetStatusFilterCommand = new RelayCommand(p => StatusFilter = p as string ?? "All");
+        SetTabCommand = new RelayCommand(p => InspectorTab = p as string ?? "Overview");
+
+        _ = LoadSavedPlaceIconsAsync();
+    }
+
+    private void OnAccountChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(Account.IsChecked):
+                RaiseChecked();
+                break;
+            case nameof(Account.Presence):
+                RaiseCounts();
+                if (_sortMode == "Status") QueueReshape();
+                break;
+            case nameof(Account.NeedsAttention):
+            case nameof(Account.IsFavorite):
+                RaiseCounts();
+                QueueReshape();
+                break;
+            case nameof(Account.Group):
+                QueueReshape();
+                break;
+            case nameof(Account.Robux) when _sortMode == "Robux":
+            case nameof(Account.PlaytimeTotal) when _sortMode == "Playtime":
+                QueueReshape();
+                break;
+        }
+        if (ReferenceEquals(sender, _selected) && e.PropertyName == nameof(Account.TotpSecret)) RefreshTotp();
+    }
+
+    private readonly DispatcherTimer _reshape;
+
+    private void QueueReshape()
+    {
+        _reshape.Stop();
+        _reshape.Start();
+    }
+
+    public void RefreshLocalized()
+    {
+        OnPropertyChanged(string.Empty);
+        RefreshView();
+    }
+
+    // ================================================================ filtering, sorting, grouping
+
+    private string _searchText = "";
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (!SetField(ref _searchText, value ?? "")) return;
+            _filterDebounce.Stop();
+            _filterDebounce.Start();
+        }
+    }
+
+    private string _statusFilter = "All";
+    public string StatusFilter
+    {
+        get => _statusFilter;
+        set { if (SetField(ref _statusFilter, StatusFilters.Contains(value) ? value : "All")) RefreshView(); }
+    }
+
+    private string? _groupFilter;
+    /// <summary>Group picked in the sidebar; null shows every group.</summary>
+    public string? GroupFilter
+    {
+        get => _groupFilter;
+        set
+        {
+            if (!SetField(ref _groupFilter, value)) return;
+            ApplySortAndGrouping();
+            RefreshView();
+            OnPropertyChanged(nameof(Subtitle));
+            OnPropertyChanged(nameof(Title));
+        }
+    }
+
+    private string _sortMode;
+    public string SortMode
+    {
+        get => _sortMode;
+        set
+        {
+            if (!SortModes.Contains(value) || !SetField(ref _sortMode, value)) return;
+            SettingsService.Current.AccountSort = value;
+            SettingsService.Save();
+            ApplySortAndGrouping();
+        }
+    }
+
+    private bool _groupAccounts;
+    public bool GroupAccounts
+    {
+        get => _groupAccounts;
+        set
+        {
+            if (!SetField(ref _groupAccounts, value)) return;
+            SettingsService.Current.GroupAccounts = value;
+            SettingsService.Save();
+            ApplySortAndGrouping();
+        }
+    }
+
+    public bool IsCompact
+    {
+        get => string.Equals(SettingsService.Current.AccountViewMode, "Compact", StringComparison.OrdinalIgnoreCase);
+        set
+        {
+            SettingsService.Current.AccountViewMode = value ? "Compact" : "Card";
+            SettingsService.Save();
+            OnPropertyChanged();
+        }
+    }
+
+    public void RefreshViewMode() => OnPropertyChanged(nameof(IsCompact));
+
+    private void ApplySortAndGrouping()
+    {
+        using (AccountsView.DeferRefresh())
+        {
+            AccountsView.GroupDescriptions.Clear();
+            AccountsView.SortDescriptions.Clear();
+            AccountsView.CustomSort = null;
+
+            bool grouped = _groupAccounts && _groupFilter == null && _store.Groups.Skip(1).Any();
+            if (grouped) AccountsView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(Account.Group)));
+
+            AccountsView.CustomSort = new AccountComparer(_sortMode, grouped);
+        }
+        OnPropertyChanged(nameof(IsGrouped));
+    }
+
+    public bool IsGrouped => AccountsView.GroupDescriptions.Count > 0;
+
+    private sealed class AccountComparer : System.Collections.IComparer
+    {
+        private readonly string _mode;
+        private readonly bool _grouped;
+        public AccountComparer(string mode, bool grouped) { _mode = mode; _grouped = grouped; }
+
+        public int Compare(object? x, object? y)
+        {
+            if (x is not Account a || y is not Account b) return 0;
+            int c;
+            if (_grouped)
+            {
+                c = GroupRank(a.Group).CompareTo(GroupRank(b.Group));
+                if (c != 0) return c;
+                c = string.Compare(a.Group, b.Group, StringComparison.CurrentCultureIgnoreCase);
+                if (c != 0) return c;
+            }
+            c = b.IsFavorite.CompareTo(a.IsFavorite);
+            if (c != 0) return c;
+
+            c = _mode switch
+            {
+                "Status" => PresenceStatus.Rank(a.Presence).CompareTo(PresenceStatus.Rank(b.Presence)),
+                "Recent" => b.LastUse.CompareTo(a.LastUse),
+                "Robux" => b.Robux.CompareTo(a.Robux),
+                "Playtime" => b.PlaytimeTotal.CompareTo(a.PlaytimeTotal),
+                _ => 0,
+            };
+            if (c != 0) return c;
+            return string.Compare(a.DisplayNameOrUser, b.DisplayNameOrUser, StringComparison.CurrentCultureIgnoreCase);
+        }
+
+        private static int GroupRank(string g) => g.Equals("Default", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+    }
+
+    private bool FilterAccount(object o)
+    {
+        if (o is not Account a) return false;
+
+        if (_groupFilter != null && !a.Group.Equals(_groupFilter, StringComparison.OrdinalIgnoreCase)) return false;
+
+        bool statusOk = _statusFilter switch
+        {
+            "Online" => a.IsOnline,
+            "InGame" => a.Presence == PresenceStatus.InGame,
+            "Offline" => !a.IsOnline,
+            "Attention" => a.NeedsAttention,
+            "Favorites" => a.IsFavorite,
+            _ => true,
+        };
+        if (!statusOk) return false;
+
+        string q = _searchText.Trim();
+        if (q.Length == 0) return true;
+        return a.Username.Contains(q, StringComparison.CurrentCultureIgnoreCase)
+            || a.DisplayName.Contains(q, StringComparison.CurrentCultureIgnoreCase)
+            || a.Alias.Contains(q, StringComparison.CurrentCultureIgnoreCase)
+            || a.Group.Contains(q, StringComparison.CurrentCultureIgnoreCase)
+            || a.Description.Contains(q, StringComparison.CurrentCultureIgnoreCase)
+            || (a.UserId > 0 && a.UserId.ToString().Contains(q, StringComparison.Ordinal));
+    }
+
+    public void RefreshView()
+    {
+        AccountsView.Refresh();
+        OnPropertyChanged(nameof(VisibleCount));
+        OnPropertyChanged(nameof(IsFilterEmpty));
+        OnPropertyChanged(nameof(HasActiveFilter));
+    }
+
+    public int VisibleCount => AccountsView.Count;
+    public bool HasActiveFilter => _searchText.Trim().Length > 0 || _statusFilter != "All" || _groupFilter != null;
+    public bool IsFilterEmpty => _store.Accounts.Count > 0 && AccountsView.Count == 0;
+    public bool IsStoreEmpty => _store.Accounts.Count == 0;
+
+    // ---- chip counts ----
+    public int CountAll => _store.Accounts.Count(InGroupScope);
+    public int CountOnline => _store.Accounts.Count(a => InGroupScope(a) && a.IsOnline);
+    public int CountInGame => _store.Accounts.Count(a => InGroupScope(a) && a.Presence == PresenceStatus.InGame);
+    public int CountOffline => _store.Accounts.Count(a => InGroupScope(a) && !a.IsOnline);
+    public int CountAttention => _store.Accounts.Count(a => InGroupScope(a) && a.NeedsAttention);
+
+    private bool InGroupScope(Account a) => _groupFilter == null || a.Group.Equals(_groupFilter, StringComparison.OrdinalIgnoreCase);
+
+    private void RaiseCounts()
+    {
+        OnPropertyChanged(nameof(CountAll));
+        OnPropertyChanged(nameof(CountOnline));
+        OnPropertyChanged(nameof(CountInGame));
+        OnPropertyChanged(nameof(CountOffline));
+        OnPropertyChanged(nameof(CountAttention));
+        OnPropertyChanged(nameof(IsStoreEmpty));
+        OnPropertyChanged(nameof(IsFilterEmpty));
+        OnPropertyChanged(nameof(VisibleCount));
+        OnPropertyChanged(nameof(Subtitle));
+    }
+
+    public string Title => _groupFilter ?? L.T("Accounts.Title");
+
+    public string Subtitle
+    {
+        get
+        {
+            int total = CountAll, online = CountOnline;
+            return total == 0 ? L.T("Accounts.Subtitle.Empty") : L.N("Accounts.Subtitle", total, online);
+        }
+    }
+
+    // ================================================================ selection
 
     private Account? _selected;
     public Account? Selected
     {
         get => _selected;
-        set { if (SetField(ref _selected, value)) { OnPropertyChanged(nameof(HasSelection)); SyncGroupSelection(); RefreshTotp(); } }
+        set
+        {
+            if (!SetField(ref _selected, value)) return;
+            OnPropertyChanged(nameof(HasSelection));
+            SyncGroupOptions();
+            RefreshTotp();
+            RaiseFFlagWarnings();
+        }
     }
 
     public bool HasSelection => _selected != null;
 
-    // ---- 2FA (TOTP) ----------------------------------------------------------
-    // Accounts could already store a Base32 2FA secret and TotpService could already turn it
-    // into a code, but the two were never connected — nothing generated or displayed one.
+    public bool MaskUsernames => SettingsService.Current.HideUsernames;
+    public void RefreshMask() => OnPropertyChanged(nameof(MaskUsernames));
 
-    private System.Windows.Threading.DispatcherTimer? _totpTimer;
+    private string _inspectorTab = "Overview";
+    public string InspectorTab { get => _inspectorTab; set => SetField(ref _inspectorTab, value); }
+
+    // ---- bulk selection (check boxes) ----
+    public int CheckedCount => _store.Accounts.Count(a => a.IsChecked);
+    public bool HasChecked => CheckedCount > 0;
+    public string CheckedText => L.N("Accounts.Bulk.Selected", CheckedCount);
+
+    private void RaiseChecked()
+    {
+        OnPropertyChanged(nameof(CheckedCount));
+        OnPropertyChanged(nameof(HasChecked));
+        OnPropertyChanged(nameof(CheckedText));
+    }
+
+    /// <summary>Checked accounts when any are ticked, otherwise the selected one.</summary>
+    private List<Account> Targets()
+    {
+        var ticked = _store.Accounts.Where(a => a.IsChecked).ToList();
+        if (ticked.Count > 0) return ticked;
+        return _selected != null ? new List<Account> { _selected } : new List<Account>();
+    }
+
+    // ================================================================ commands
+
+    public AsyncRelayCommand AddCommand { get; }
+    public AsyncRelayCommand ImportCommand { get; }
+    public AsyncRelayCommand ImportIc3w0lfCommand { get; }
+    public RelayCommand ExportCommand { get; }
+    public RelayCommand FindDuplicatesCommand { get; }
+    public AsyncRelayCommand RefreshAllCommand { get; }
+    public AsyncRelayCommand LaunchCommand { get; }
+    public AsyncRelayCommand ShuffleJoinCommand { get; }
+    public AsyncRelayCommand PingJoinCommand { get; }
+    public AsyncRelayCommand ServerHopCommand { get; }
+    public AsyncRelayCommand SquadJoinCommand { get; }
+    public AsyncRelayCommand FollowCommand { get; }
+    public RelayCommand BrowseServersCommand { get; }
+    public RelayCommand RemoveCommand { get; }
+    public RelayCommand CopyCookieCommand { get; }
+    public RelayCommand CopyUserIdCommand { get; }
+    public RelayCommand ToggleFavoriteCommand { get; }
+    public RelayCommand SetGroupCommand { get; }
+    public RelayCommand SetColorCommand { get; }
+    public AsyncRelayCommand OpenBrowserCommand { get; }
+    public RelayCommand OpenProfileCommand { get; }
+    public AsyncRelayCommand OpenAppCommand { get; }
+    public AsyncRelayCommand InjectScriptCommand { get; }
+    public AsyncRelayCommand ValidateSelectedCommand { get; }
+    public AsyncRelayCommand SignInAgainCommand { get; }
+    public AsyncRelayCommand TestAccountProxyCommand { get; }
+    public RelayCommand SavePlaceCommand { get; }
+    public RelayCommand RemovePlaceCommand { get; }
+    public RelayCommand ApplySavedPlaceCommand { get; }
+    public RelayCommand CopyTotpCommand { get; }
+    public RelayCommand ClearChecksCommand { get; }
+    public RelayCommand CheckAllVisibleCommand { get; }
+    public RelayCommand ClearFiltersCommand { get; }
+    public RelayCommand SetStatusFilterCommand { get; }
+    public RelayCommand SetTabCommand { get; }
+
+    private bool _busy;
+    public bool Busy { get => _busy; set => SetField(ref _busy, value); }
+
+    // ================================================================ add / import / export
+
+    private async Task AddAsync(int startTab)
+    {
+        if (LockService.IsLocked) return;
+        var added = DialogService.ShowAddAccount(_store, startTab);
+        if (added == null) return;
+        GroupFilter = null;
+        StatusFilter = "All";
+        Selected = added;
+        _main.SetStatus(L.T("Status.Added", added.DisplayNameOrUser));
+        await _store.RefreshLiveDataAsync(new[] { added });
+    }
+
+    private async Task ImportAsync()
+    {
+        var text = DialogService.ShowImport();
+        if (string.IsNullOrWhiteSpace(text)) return;
+        Busy = true;
+        try
+        {
+            var (added, failed) = await _store.ImportManyAsync(text, s => _main.SetStatus(s));
+            _main.SetStatus(L.T("Import.Done", added, failed));
+            ToastService.Info(L.T("Import.DoneTitle"), L.T("Import.Done", added, failed));
+            await _store.RefreshLiveDataAsync();
+        }
+        finally { Busy = false; }
+    }
+
+    /// <summary>
+    /// Imports from ic3w0lf's Roblox Account Manager. The data file is located automatically where
+    /// possible and read tolerantly; every cookie found is validated before it is added.
+    /// </summary>
+    private async Task ImportIc3w0lfAsync()
+    {
+        var auto = Ic3w0lfImportService.AutoLocate();
+        var path = DialogService.PickFile(L.T("Import.Ic3w0lf.Pick"),
+            "AccountData|AccountData;AccountData.json;accounts.json|*.*|*.*", auto);
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        var read = Ic3w0lfImportService.ReadFile(path);
+        if (!read.Ok)
+        {
+            DialogService.Info(L.T("Import.Ic3w0lf.NothingTitle"), read.Message);
+            return;
+        }
+
+        _main.SetStatus(read.Message);
+        Busy = true;
+        try
+        {
+            var (added, failed) = await _store.ImportManyAsync(read.Text, s => _main.SetStatus(s));
+            _main.SetStatus(L.T("Import.Done", added, failed));
+            await _store.RefreshLiveDataAsync();
+        }
+        finally { Busy = false; }
+    }
+
+    private void Export()
+    {
+        var ticked = _store.Accounts.Where(a => a.IsChecked).ToList();
+        var scope = ticked.Count > 0 ? ticked : AccountsView.OfType<Account>().ToList();
+        if (scope.Count == 0) { _main.SetStatus(L.T("Export.Nothing")); return; }
+        string? path = DialogService.SaveFile(L.T("Export.Title"),
+            "CSV (*.csv)|*.csv|JSON (*.json)|*.json",
+            $"accounts-{DateTime.Now:yyyyMMdd-HHmmss}.csv");
+        if (path == null) return;
+        try
+        {
+            bool json = path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+            string content = json ? ScaleService.ToJson(scope, includeCookies: false) : ScaleService.ToCsv(scope);
+            System.IO.File.WriteAllText(path, content);
+            _main.SetStatus(L.N("Export.Done", scope.Count, System.IO.Path.GetFileName(path)));
+        }
+        catch (Exception ex) { DialogService.Info(L.T("Export.Failed"), ex.Message); }
+    }
+
+    private void FindDuplicates()
+    {
+        var dupes = ScaleService.FindDuplicates(_store.Accounts);
+        foreach (var a in _store.Accounts) a.IsChecked = false;
+        int n = 0;
+        foreach (var grp in dupes)
+            foreach (var a in grp) { a.IsChecked = true; n++; }
+        if (n == 0) DialogService.Info(L.T("Duplicates.Title"), L.T("Duplicates.None"));
+        else _main.SetStatus(L.T("Duplicates.Found", dupes.Count, n));
+    }
+
+    private async Task RefreshAllAsync()
+    {
+        if (_store.Accounts.Count == 0) { _main.SetStatus(L.T("Status.NothingToRefresh")); return; }
+        Busy = true;
+        _main.SetStatus(L.T("Status.Refreshing"));
+        try
+        {
+            await _store.RefreshLiveDataAsync();
+            _main.SetStatus(L.T("Status.Refreshed"));
+        }
+        finally { Busy = false; }
+    }
+
+    // ================================================================ account actions
+
+    private void Remove()
+    {
+        var targets = Targets();
+        if (targets.Count == 0) { _main.SetStatus(L.T("Status.SelectFirst")); return; }
+        string names = targets.Count == 1 ? targets[0].DisplayNameOrUser : L.N("Accounts.Count", targets.Count);
+        if (!DialogService.Confirm(L.T("Remove.Title"), L.T("Remove.Body", names), L.T("Remove.Action"), danger: true))
+            return;
+        foreach (var a in targets) _store.Remove(a);
+        _main.SetStatus(L.T("Remove.Done", names));
+    }
+
+    private void CopyCookie()
+    {
+        if (_selected == null) return;
+        if (string.IsNullOrEmpty(_selected.Cookie)) { _main.SetStatus(L.T("Launch.NoCookie")); return; }
+        if (!DialogService.Confirm(L.T("CopyCookie.Title"), L.T("CopyCookie.Body"), L.T("CopyCookie.Action"))) return;
+        bool ok = ClipboardService.CopySecret(_selected.Cookie);
+        int clearAfter = SettingsService.Current.ClipboardClearSeconds;
+        _main.SetStatus(!ok ? L.T("Status.ClipboardBusy")
+            : clearAfter > 0 ? L.N("CopyCookie.Done", clearAfter)
+            : L.T("CopyCookie.DoneKept"));
+        if (ok) AuditLogService.Log(AuditLogService.Category.Cookie, $"Cookie copied for {_selected.Username} (userId {_selected.UserId})");
+    }
+
+    private void CopyUserId()
+    {
+        if (_selected == null || _selected.UserId <= 0) return;
+        _main.SetStatus(ClipboardService.CopyText(_selected.UserId.ToString()) ? L.T("Status.Copied") : L.T("Status.ClipboardBusy"));
+    }
+
+    private void ToggleFavorite(Account? acc)
+    {
+        if (acc == null) return;
+        acc.IsFavorite = !acc.IsFavorite;
+        _store.Save();
+        _main.SetStatus(acc.IsFavorite ? L.T("Status.Pinned", acc.DisplayNameOrUser) : L.T("Status.Unpinned", acc.DisplayNameOrUser));
+    }
+
+    private void SetGroupForTargets()
+    {
+        var targets = Targets();
+        if (targets.Count == 0) { _main.SetStatus(L.T("Status.SelectFirst")); return; }
+        string? g = DialogService.Prompt(L.T("Group.Move.Title"), L.T("Group.Move.Label"), targets[0].Group);
+        if (g == null) return;
+        g = string.IsNullOrWhiteSpace(g) ? "Default" : g.Trim();
+        foreach (var a in targets) a.Group = g;
+        _store.Save();
+        SyncGroupOptions();
+        ApplySortAndGrouping();
+        _main.SetStatus(L.N("Group.Moved", targets.Count, g));
+    }
+
+    public static readonly string[] TagColors = { "#F0616A", "#F2994A", "#E8C547", "#34C77B", "#3AA0FF", "#9B7BFF", "#E26DC4" };
+
+    private void SetColor(string? hex)
+    {
+        var targets = Targets();
+        if (targets.Count == 0) { _main.SetStatus(L.T("Status.SelectFirst")); return; }
+        foreach (var a in targets) a.Color = hex ?? "";
+        _store.Save();
+    }
+
+    private async Task OpenBrowserAsync()
+    {
+        if (_selected == null) return;
+        var acc = _selected;
+        Busy = true;
+        _main.SetStatus(L.T("Browser.Opening", acc.DisplayNameOrUser));
+        try
+        {
+            var r = await BrowserService.OpenLoggedInAsync(acc);
+            if (!r.Success && r.NoBrowser && OfferBrowserDownload())
+                r = await BrowserService.OpenLoggedInAsync(acc);
+            _main.SetStatus(r.Message);
+            if (!r.Success) ToastService.Error(L.T("Browser.OpenFailedTitle"), r.Message);
+        }
+        finally { Busy = false; }
+    }
+
+    /// <summary>Offers the private browser when no Edge / Chrome exists. True when it is installed afterwards.</summary>
+    private static bool OfferBrowserDownload()
+        => DialogService.Confirm(L.T("Browser.Download.Title"), L.T("Browser.Download.Body"), L.T("Common.Download"))
+           && DialogService.ShowChromiumDownload();
+
+    private async Task InjectScriptAsync()
+    {
+        var targets = Targets();
+        if (targets.Count == 0) { _main.SetStatus(L.T("Status.SelectFirst")); return; }
+
+        var js = DialogService.PromptMultiline(L.T("Inject.Title"), L.T("Inject.Body"), okText: L.T("Inject.Action"));
+        if (string.IsNullOrWhiteSpace(js)) return;
+
+        Busy = true;
+        int ok = 0, fail = 0;
+        try
+        {
+            foreach (var acc in targets)
+            {
+                _main.SetStatus(L.T("Inject.Progress", acc.DisplayNameOrUser));
+                var r = await BrowserService.OpenLoggedInAsync(acc, js);
+                if (!r.Success && r.NoBrowser)
+                {
+                    if (!OfferBrowserDownload()) { _main.SetStatus(r.Message); return; }
+                    r = await BrowserService.OpenLoggedInAsync(acc, js);
+                }
+                if (r.Success) ok++; else fail++;
+            }
+        }
+        finally { Busy = false; }
+        _main.SetStatus(L.T("Inject.Done", ok, fail));
+    }
+
+    private async Task OpenAppAsync()
+    {
+        if (_selected == null) return;
+        var acc = _selected;
+        Busy = true;
+        _main.SetStatus(L.T("App.Opening", acc.DisplayNameOrUser));
+        try
+        {
+            var r = await LauncherService.OpenRobloxAppAsync(acc);
+            _store.Save();
+            _main.SetStatus(r.Success ? L.T("App.Opened", acc.DisplayNameOrUser) : r.Message);
+            if (!r.Success) ToastService.Error(L.T("Launch.FailedTitle"), r.Message);
+        }
+        finally { Busy = false; }
+    }
+
+    private async Task ValidateSelectedAsync()
+    {
+        var targets = Targets();
+        if (targets.Count == 0) return;
+        _main.SetStatus(L.T("Health.Checking"));
+        int invalid = await CookieHealthService.ValidateAllAsync(targets);
+        _store.Save();
+        _main.SetStatus(invalid == 0 ? L.N("Health.AllValid", targets.Count) : L.N("Health.SomeInvalid", invalid, targets.Count));
+    }
+
+    private async Task TestAccountProxyAsync()
+    {
+        if (_selected == null || string.IsNullOrWhiteSpace(_selected.ProxyUrl)) { _main.SetStatus(L.T("Proxy.EnterFirst")); return; }
+        _store.Save();
+        _main.SetStatus(L.T("Proxy.Testing"));
+        var (ok, message) = await RobloxApi.TestProxyAsync(_selected.ProxyUrl, "", "");
+        _main.SetStatus(message);
+        if (ok) ToastService.Success(L.T("Proxy.WorksTitle"), message);
+        else ToastService.Error(L.T("Proxy.FailedTitle"), message);
+    }
+
+    public bool AccountProxyValid => _selected == null || string.IsNullOrWhiteSpace(_selected.ProxyUrl)
+                                     || RobloxApi.TryBuildProxy(_selected.ProxyUrl, null, null) != null;
+
+    /// <summary>Called by the view when a detail field lost focus, so edits are saved without a Save button.</summary>
+    public void CommitDetails()
+    {
+        _store.Save();
+        OnPropertyChanged(nameof(AccountProxyValid));
+        RaiseFFlagWarnings();
+        SyncGroupOptions();
+    }
+
+    // ---- per-account FastFlags ----
+    public string AccountFFlagWarning
+    {
+        get
+        {
+            if (_selected == null || string.IsNullOrWhiteSpace(_selected.FFlags)) return "";
+            if (!FFlagsService.IsValidRaw(_selected.FFlags)) return L.T("FFlags.InvalidJson");
+            var ignored = FFlagsService.NotAllowlisted(FFlagsService.ParseRaw(_selected.FFlags).Keys);
+            return ignored.Count == 0 ? "" : L.T("FFlags.Ignored", string.Join(", ", ignored.Take(6)) + (ignored.Count > 6 ? "…" : ""));
+        }
+    }
+
+    private void RaiseFFlagWarnings() => OnPropertyChanged(nameof(AccountFFlagWarning));
+
+    // ================================================================ group picker
+
+    public ObservableCollection<string> GroupOptions { get; } = new();
+    public string NewGroupOption => L.T("Group.New");
+
+    private bool _suppressGroupApply;
+    private string? _selectedGroupOption;
+    public string? SelectedGroupOption
+    {
+        get => _selectedGroupOption;
+        set
+        {
+            if (!SetField(ref _selectedGroupOption, value)) return;
+            if (_suppressGroupApply || value == null || _selected == null) return;
+            if (value == NewGroupOption)
+            {
+                string? g = DialogService.Prompt(L.T("Group.New.Title"), L.T("Group.New.Label"));
+                if (string.IsNullOrWhiteSpace(g)) { SyncGroupOptions(); return; }
+                value = g.Trim();
+            }
+            if (_selected.Group == value) { SyncGroupOptions(); return; }
+            _selected.Group = value;
+            _store.Save();
+            SyncGroupOptions();
+            ApplySortAndGrouping();
+            _main.SetStatus(L.N("Group.Moved", 1, value));
+        }
+    }
+
+    private void SyncGroupOptions()
+    {
+        _suppressGroupApply = true;
+        try
+        {
+            GroupOptions.Clear();
+            var groups = _store.Groups.ToList();
+            if (!groups.Contains("Default", StringComparer.OrdinalIgnoreCase)) GroupOptions.Add("Default");
+            foreach (var g in groups) GroupOptions.Add(g);
+            GroupOptions.Add(NewGroupOption);
+            _selectedGroupOption = _selected?.Group;
+            OnPropertyChanged(nameof(SelectedGroupOption));
+        }
+        finally { _suppressGroupApply = false; }
+    }
+
+    // ================================================================ 2FA
+
+    private DispatcherTimer? _totpTimer;
 
     private string _totpCode = "";
-    /// <summary>Current 6-digit code for the selected account, or "" when it has no secret.</summary>
     public string TotpCode { get => _totpCode; private set => SetField(ref _totpCode, value); }
 
     private int _totpSeconds;
-    /// <summary>Seconds until the shown code rolls over.</summary>
-    public int TotpSeconds { get => _totpSeconds; private set { if (SetField(ref _totpSeconds, value)) OnPropertyChanged(nameof(TotpCountdown)); } }
+    public int TotpSeconds
+    {
+        get => _totpSeconds;
+        private set { if (SetField(ref _totpSeconds, value)) { OnPropertyChanged(nameof(TotpCountdown)); OnPropertyChanged(nameof(TotpProgress)); } }
+    }
 
-    public string TotpCountdown => _totpSeconds > 0 ? $"refreshes in {_totpSeconds}s" : "";
-
-    /// <summary>True once the selected account has a secret that actually produces a code.</summary>
+    public string TotpCountdown => _totpSeconds > 0 ? L.T("Totp.Countdown", _totpSeconds) : "";
+    public double TotpProgress => _totpSeconds / 30.0;
     public bool HasTotpCode => !string.IsNullOrEmpty(_totpCode);
 
-    /// <summary>Set when a secret is present but unusable, so a typo isn't silently ignored.</summary>
     private bool _totpInvalid;
     public bool TotpInvalid { get => _totpInvalid; private set => SetField(ref _totpInvalid, value); }
 
-    /// <summary>
-    /// Re-reads the selected account's secret and starts/stops the one-second refresh.
-    /// The timer only runs while a 2FA account is selected — an idle tick per second for
-    /// every user would be pure waste.
-    /// </summary>
     private void RefreshTotp()
     {
         UpdateTotpNow();
-
         bool wanted = !string.IsNullOrWhiteSpace(_selected?.TotpSecret);
         if (wanted && _totpTimer == null)
         {
-            // Bind to the application dispatcher explicitly: DispatcherTimer otherwise attaches
-            // to whatever thread constructs it, and a timer on a pumpless thread never ticks.
-            var dispatcher = App.Current?.Dispatcher;
-            if (dispatcher == null) return;
-            _totpTimer = new System.Windows.Threading.DispatcherTimer(
-                System.Windows.Threading.DispatcherPriority.Normal, dispatcher)
-            {
-                Interval = TimeSpan.FromSeconds(1)
-            };
+            _totpTimer = new DispatcherTimer(DispatcherPriority.Normal, Application.Current.Dispatcher) { Interval = TimeSpan.FromSeconds(1) };
             _totpTimer.Tick += (_, _) => UpdateTotpNow();
             _totpTimer.Start();
         }
@@ -85,15 +807,13 @@ public class AccountsViewModel : ObservableObject
             OnPropertyChanged(nameof(HasTotpCode));
             return;
         }
-
         string? code = TotpService.Generate(secret);
-        TotpCode = code ?? "";
+        TotpCode = code == null ? "" : $"{code[..3]} {code[3..]}";
         TotpInvalid = code == null;
         TotpSeconds = code == null ? 0 : TotpService.SecondsRemaining();
         OnPropertyChanged(nameof(HasTotpCode));
     }
 
-    /// <summary>Called by the view after the secret box is edited, so the code appears at once.</summary>
     public void OnTotpSecretEdited()
     {
         _store.Save();
@@ -102,159 +822,54 @@ public class AccountsViewModel : ObservableObject
 
     private void CopyTotp()
     {
-        if (string.IsNullOrEmpty(_totpCode)) { _main.SetStatus("No 2FA code to copy — add a secret first."); return; }
-        try { Clipboard.SetText(_totpCode); _main.SetStatus("2FA code copied to clipboard."); }
-        catch { _main.SetStatus("Could not access the clipboard."); }
+        if (string.IsNullOrEmpty(_totpCode)) return;
+        _main.SetStatus(ClipboardService.CopySecret(_totpCode.Replace(" ", "")) ? L.T("Totp.Copied") : L.T("Status.ClipboardBusy"));
     }
 
-    // ---- group dropdown ----
-    private const string NewGroupSentinel = "＋  New group…";
-    public System.Collections.ObjectModel.ObservableCollection<string> GroupOptions { get; } = new();
-
-    private bool _suppressGroupApply;
-    private string? _selectedGroupOption;
-    public string? SelectedGroupOption
-    {
-        get => _selectedGroupOption;
-        set
-        {
-            if (!SetField(ref _selectedGroupOption, value)) return;
-            if (_suppressGroupApply || value == null) return;
-            if (value == NewGroupSentinel) PromptNewGroup();
-            else ApplyGroup(value);
-        }
-    }
-
-    private void RefreshGroupOptions()
-    {
-        GroupOptions.Clear();
-        var groups = _store.Accounts.Select(a => a.Group).Where(g => !string.IsNullOrWhiteSpace(g))
-            .Distinct().OrderBy(g => g).ToList();
-        if (!groups.Contains("Default")) GroupOptions.Add("Default");
-        foreach (var g in groups) GroupOptions.Add(g);
-        GroupOptions.Add(NewGroupSentinel);
-    }
-
-    private void SyncGroupSelection()
-    {
-        _suppressGroupApply = true;
-        RefreshGroupOptions();
-        _selectedGroupOption = _selected?.Group;
-        OnPropertyChanged(nameof(SelectedGroupOption));
-        _suppressGroupApply = false;
-    }
-
-    private void PromptNewGroup()
-    {
-        string? g = DialogService.Prompt("New group", "Name the new group");
-        if (string.IsNullOrWhiteSpace(g)) { SyncGroupSelection(); return; }
-        ApplyGroup(g.Trim());
-    }
-
-    private void ApplyGroup(string g)
-    {
-        if (_selected == null || _selected.Group == g) { SyncGroupSelection(); return; }
-        var acc = _selected;
-        acc.Group = g;
-        int idx = _store.Accounts.IndexOf(acc);
-        if (idx >= 0) _store.Accounts.RemoveAt(idx);
-        _store.Accounts.Add(acc);
-        Selected = acc;              // re-select and resync the dropdown
-        _store.Save();
-        _main.SetStatus($"Moved {acc.DisplayNameOrUser} to '{g}'.");
-    }
-
-    // ---- scale management (#28): bulk colour tags, duplicate scan, export ----
-
-    /// <summary>Checked rows if any are ticked, otherwise the single selected account.</summary>
-    private System.Collections.Generic.List<Account> CheckedOrSelected()
-    {
-        var ticked = _store.Accounts.Where(a => a.IsChecked).ToList();
-        if (ticked.Count > 0) return ticked;
-        return _selected != null
-            ? new System.Collections.Generic.List<Account> { _selected }
-            : new System.Collections.Generic.List<Account>();
-    }
-
-    private void SetColor(string? hex)
-    {
-        var targets = CheckedOrSelected();
-        if (targets.Count == 0) { _main.SetStatus("Check or select accounts to colour first."); return; }
-        foreach (var a in targets) a.Color = hex ?? "";
-        _store.Save();
-        _main.SetStatus(string.IsNullOrEmpty(hex)
-            ? $"Cleared colour on {targets.Count} account(s)."
-            : $"Coloured {targets.Count} account(s).");
-    }
-
-    private void Export()
-    {
-        var ticked = _store.Accounts.Where(a => a.IsChecked).ToList();
-        var scope = ticked.Count > 0 ? ticked : _store.Accounts.ToList();
-        if (scope.Count == 0) { _main.SetStatus("No accounts to export."); return; }
-        string? path = DialogService.SaveFile("Export accounts",
-            "CSV (*.csv)|*.csv|JSON (*.json)|*.json",
-            $"accounts-{System.DateTime.Now:yyyyMMdd-HHmmss}.csv");
-        if (path == null) return;
-        try
-        {
-            bool json = path.EndsWith(".json", System.StringComparison.OrdinalIgnoreCase);
-            string content = json
-                ? ScaleService.ToJson(scope, includeCookies: false)
-                : ScaleService.ToCsv(scope);
-            System.IO.File.WriteAllText(path, content);
-            _main.SetStatus($"Exported {scope.Count} account(s) → {System.IO.Path.GetFileName(path)}.");
-        }
-        catch (System.Exception ex) { DialogService.Info("Export failed", ex.Message); }
-    }
-
-    private void FindDuplicates()
-    {
-        var dupes = ScaleService.FindDuplicates(_store.Accounts);
-        foreach (var a in _store.Accounts) a.IsChecked = false;
-        int n = 0;
-        foreach (var grp in dupes)
-            foreach (var a in grp) { a.IsChecked = true; n++; }
-        if (n == 0)
-            DialogService.Info("Duplicate scan", "No duplicate accounts found — every UserId is unique.");
-        else
-            _main.SetStatus($"{dupes.Count} duplicate set(s) found — {n} accounts checked for review.");
-    }
-
-    public bool MaskUsernames => SettingsService.Current.HideUsernames;
-    public void RefreshMask() => OnPropertyChanged(nameof(MaskUsernames));
-
-    // View-mode (Card vs Compact) — mirrors the RefreshMask cross-VM pattern; driven by SettingsViewModel.AccountViewMode
-    public bool IsCompact => string.Equals(SettingsService.Current.AccountViewMode, "Compact", System.StringComparison.OrdinalIgnoreCase);
-    public void RefreshViewMode() => OnPropertyChanged(nameof(IsCompact));
+    // ================================================================ launching
 
     private string _placeIdText = "";
     public string PlaceIdText
     {
         get => _placeIdText;
-        set { if (SetField(ref _placeIdText, value)) LookupPlaceDebounced(); }
+        set { if (SetField(ref _placeIdText, value ?? "")) LookupPlaceDebounced(); }
     }
 
+    private string _jobIdText = "";
+    public string JobIdText { get => _jobIdText; set => SetField(ref _jobIdText, value ?? ""); }
+
+    private string _followText = "";
+    public string FollowText { get => _followText; set => SetField(ref _followText, value ?? ""); }
+
     private string _gameName = "";
-    public string GameName { get => _gameName; set { SetField(ref _gameName, value); OnPropertyChanged(nameof(HasGameInfo)); } }
+    public string GameName { get => _gameName; private set { if (SetField(ref _gameName, value)) OnPropertyChanged(nameof(HasGameInfo)); } }
 
     private string _gameCreator = "";
-    public string GameCreator { get => _gameCreator; set => SetField(ref _gameCreator, value); }
+    public string GameCreator { get => _gameCreator; private set => SetField(ref _gameCreator, value); }
 
     private string? _gameIcon;
-    public string? GameIcon { get => _gameIcon; set => SetField(ref _gameIcon, value); }
-
-    // UniverseId from the most recent place lookup — cached onto a SavedPlace when it's saved.
-    private long _lastUniverseId;
+    public string? GameIcon { get => _gameIcon; private set => SetField(ref _gameIcon, value); }
 
     public bool HasGameInfo => !string.IsNullOrEmpty(_gameName);
 
+    private long _lastUniverseId;
     private CancellationTokenSource? _placeLookupCts;
+
+    /// <summary>A pasted game link fills the Place ID; digits are extracted from anything else.</summary>
+    private long ParsePlaceId(string text)
+    {
+        text = (text ?? "").Trim();
+        if (text.Contains("roblox.com", StringComparison.OrdinalIgnoreCase) || text.StartsWith("roblox:", StringComparison.OrdinalIgnoreCase))
+        {
+            var parsed = RobloxApi.ParseJoinLink(text);
+            if (parsed.PlaceId > 0) return parsed.PlaceId;
+        }
+        var digits = new string(text.Where(char.IsDigit).ToArray());
+        return digits.Length is > 0 and <= 18 && long.TryParse(digits, out long id) ? id : 0;
+    }
 
     private void LookupPlaceDebounced()
     {
-        // Cancel *and* dispose: this fires on every keystroke in the Place ID box, so the
-        // superseded sources (each holding a timer registration) used to pile up unreleased.
         var previous = _placeLookupCts;
         _placeLookupCts = null;
         if (previous != null)
@@ -263,8 +878,8 @@ public class AccountsViewModel : ObservableObject
             previous.Dispose();
         }
 
-        var digits = new string(_placeIdText.Where(char.IsDigit).ToArray());
-        if (!long.TryParse(digits, out long placeId) || placeId <= 0)
+        long placeId = ParsePlaceId(_placeIdText);
+        if (placeId <= 0)
         {
             GameName = ""; GameCreator = ""; GameIcon = null;
             return;
@@ -272,528 +887,178 @@ public class AccountsViewModel : ObservableObject
 
         var cts = new CancellationTokenSource();
         _placeLookupCts = cts;
-        // Snapshot the token: the source is disposed by the next keystroke, and reading
-        // .Token off a disposed source throws.
         var token = cts.Token;
         _ = Task.Run(async () =>
         {
             try
             {
-                await Task.Delay(500, token);
-                if (token.IsCancellationRequested) return;
-
-                string cookie = _store.Accounts.FirstOrDefault(a => a.IsValid)?.Cookie ?? "";
+                await Task.Delay(450, token);
+                string cookie = _store.Accounts.ToArray().FirstOrDefault(a => a.IsValid && a.Cookie.Length > 0)?.Cookie ?? "";
                 var info = await RobloxApi.GetPlaceInfoAsync(cookie, placeId);
                 if (token.IsCancellationRequested || info == null) return;
-
                 string? icon = await RobloxApi.GetGameIconAsync(info.UniverseId);
                 if (token.IsCancellationRequested) return;
 
-                App.Current.Dispatcher.Invoke(() =>
+                await Application.Current.Dispatcher.InvokeAsync(() =>
                 {
                     _lastUniverseId = info.UniverseId;
                     GameName = info.Name;
-                    GameCreator = string.IsNullOrEmpty(info.Creator) ? "" : $"by {info.Creator}";
+                    GameCreator = string.IsNullOrEmpty(info.Creator) ? "" : L.T("Launch.By", info.Creator);
                     GameIcon = icon;
                 });
             }
-            catch { }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { DiagnosticsService.Warn("accounts", "Game lookup failed", ex); }
         });
-    }
-
-    // ---- saved places ----
-    public System.Collections.ObjectModel.ObservableCollection<SavedPlace> SavedPlaces { get; } = new();
-
-    private bool _savedPlacesOpen;
-    public bool SavedPlacesOpen
-    {
-        get => _savedPlacesOpen;
-        set { if (SetField(ref _savedPlacesOpen, value) && value) _ = LoadSavedPlaceIconsAsync(); }
-    }
-
-    private string _jobIdText = "";
-    public string JobIdText { get => _jobIdText; set => SetField(ref _jobIdText, value); }
-
-    private string _followText = "";
-    public string FollowText { get => _followText; set => SetField(ref _followText, value); }
-
-    private bool _busy;
-    public bool Busy { get => _busy; set => SetField(ref _busy, value); }
-
-    // Commands
-    public AsyncRelayCommand AddCommand { get; }
-    public AsyncRelayCommand ImportCommand { get; }
-    public AsyncRelayCommand ImportIc3w0lfCommand { get; }
-    public RelayCommand RemoveCommand { get; }
-    public AsyncRelayCommand LaunchCommand { get; }
-    public AsyncRelayCommand JoinServerCommand { get; }
-    public AsyncRelayCommand ShuffleJoinCommand { get; }
-    public AsyncRelayCommand FollowCommand { get; }
-    public AsyncRelayCommand RefreshAllCommand { get; }
-    public RelayCommand CopyCookieCommand { get; }
-    public RelayCommand ToggleFavoriteCommand { get; }
-    public RelayCommand SaveDetailsCommand { get; }
-    public RelayCommand SetGroupCommand { get; }
-    public RelayCommand BrowseServersCommand { get; }
-    public AsyncRelayCommand OpenBrowserCommand { get; }
-    public RelayCommand OpenProfileCommand { get; }
-    public AsyncRelayCommand OpenAppCommand { get; }
-    public RelayCommand SavePlaceCommand { get; }
-    public RelayCommand RemovePlaceCommand { get; }
-    public RelayCommand ApplySavedPlaceCommand { get; }
-    public RelayCommand SetColorCommand { get; }
-    public RelayCommand ClearColorCommand { get; }
-    public RelayCommand ExportCommand { get; }
-    public RelayCommand FindDuplicatesCommand { get; }
-    public AsyncRelayCommand PingJoinCommand { get; }
-    public AsyncRelayCommand ServerHopCommand { get; }
-    public AsyncRelayCommand SquadJoinCommand { get; }
-    public AsyncRelayCommand InjectScriptCommand { get; }
-    public RelayCommand CopyTotpCommand { get; }
-
-    public AccountsViewModel(AccountStore store, MainViewModel main)
-    {
-        _store = store;
-        _main = main;
-        PlaceIdText = SettingsService.Current.DefaultPlaceId > 0 ? SettingsService.Current.DefaultPlaceId.ToString() : "";
-        foreach (var p in SettingsService.Current.SavedPlaces) SavedPlaces.Add(p);
-
-        AddCommand = new AsyncRelayCommand(AddAsync);
-        ImportCommand = new AsyncRelayCommand(ImportAsync);
-        ImportIc3w0lfCommand = new AsyncRelayCommand(ImportIc3w0lfAsync);
-        RemoveCommand = new RelayCommand(p => Remove(p as IList));
-        LaunchCommand = new AsyncRelayCommand(p => LaunchAsync(p as IList));
-        JoinServerCommand = new AsyncRelayCommand(p => JoinServerAsync(p as IList));
-        ShuffleJoinCommand = new AsyncRelayCommand(p => ShuffleJoinAsync(p as IList));
-        FollowCommand = new AsyncRelayCommand(p => FollowAsync(p as IList));
-        RefreshAllCommand = new AsyncRelayCommand(RefreshAllAsync);
-        CopyCookieCommand = new RelayCommand(_ => CopyCookie());
-        ToggleFavoriteCommand = new RelayCommand(p => ToggleFavorite(p as Account));
-        SaveDetailsCommand = new RelayCommand(_ => SaveDetails());
-        SetGroupCommand = new RelayCommand(p => SetGroup(p as IList));
-        BrowseServersCommand = new RelayCommand(_ => BrowseServers());
-        OpenBrowserCommand = new AsyncRelayCommand(OpenBrowserAsync);
-        OpenProfileCommand = new RelayCommand(_ => { if (_selected != null) BrowserService.OpenProfile(_selected); });
-        OpenAppCommand = new AsyncRelayCommand(OpenAppAsync);
-        SavePlaceCommand = new RelayCommand(_ => SavePlace());
-        RemovePlaceCommand = new RelayCommand(p => RemovePlace(p as SavedPlace));
-        ApplySavedPlaceCommand = new RelayCommand(p => ApplySavedPlace(p as SavedPlace));
-        SetColorCommand = new RelayCommand(p => SetColor(p as string));
-        ClearColorCommand = new RelayCommand(_ => SetColor(""));
-        ExportCommand = new RelayCommand(_ => Export());
-        FindDuplicatesCommand = new RelayCommand(_ => FindDuplicates());
-        PingJoinCommand = new AsyncRelayCommand(p => PingJoinAsync(p as IList));
-        ServerHopCommand = new AsyncRelayCommand(p => ServerHopAsync(p as IList));
-        SquadJoinCommand = new AsyncRelayCommand(p => SquadJoinAsync(p as IList));
-        InjectScriptCommand = new AsyncRelayCommand(p => InjectScriptAsync(p as IList));
-        CopyTotpCommand = new RelayCommand(_ => CopyTotp());
-
-        _ = LoadSavedPlaceIconsAsync();   // warm up saved-place icons in the background
-    }
-
-    private async Task OpenBrowserAsync()
-    {
-        if (_selected == null) { _main.SetStatus("Select an account first."); return; }
-        Busy = true; _main.SetStatus($"Opening {_selected.DisplayNameOrUser} in a browser…");
-        var r = await BrowserService.OpenLoggedInAsync(_selected);
-        Busy = false;
-
-        if (!r.Success && r.Message == "no-chromium")
-        {
-            if (DialogService.Confirm("Chromium required",
-                "Opening an account in a browser uses a private, portable Chromium (downloaded once, ~330 MB, kept separate from your normal browser). Download it now?"))
-            {
-                if (DialogService.ShowChromiumDownload())
-                {
-                    _main.SetStatus("Chromium ready — opening account…");
-                    Busy = true;
-                    var r2 = await BrowserService.OpenLoggedInAsync(_selected);
-                    Busy = false;
-                    _main.SetStatus(r2.Message);
-                }
-                else _main.SetStatus("Chromium download cancelled.");
-            }
-            return;
-        }
-
-        _main.SetStatus(r.Message);
-    }
-
-    // #29 Inject: run a JS snippet in each selected account's authenticated CloakBrowser session.
-    private async Task InjectScriptAsync(IList? list)
-    {
-        var sel = Sel(list);
-        if (sel.Count == 0) { _main.SetStatus("Select at least one account."); return; }
-
-        var js = DialogService.Prompt("Inject script",
-            "JavaScript to run in each account's logged-in browser (e.g. a bookmarklet one-liner):");
-        if (string.IsNullOrWhiteSpace(js)) return;
-
-        Busy = true;
-        int ok = 0, fail = 0;
-        bool chromiumOffered = false;
-        foreach (var acc in sel)
-        {
-            _main.SetStatus($"Injecting into {acc.DisplayNameOrUser}…");
-            var r = await BrowserService.OpenLoggedInAsync(acc, js);
-
-            if (!r.Success && r.Message == "no-chromium")
-            {
-                if (chromiumOffered) { fail++; continue; }   // only ask once per batch
-                chromiumOffered = true;
-                Busy = false;
-                if (DialogService.Confirm("Chromium required",
-                    "Injecting a script uses a private, portable Chromium (downloaded once, ~330 MB, kept separate from your normal browser). Download it now?")
-                    && DialogService.ShowChromiumDownload())
-                {
-                    Busy = true;
-                    r = await BrowserService.OpenLoggedInAsync(acc, js);
-                }
-                else { _main.SetStatus("Injection cancelled — Chromium is required."); return; }
-            }
-
-            if (r.Success) ok++; else fail++;
-        }
-        Busy = false;
-        _main.SetStatus(fail == 0
-            ? $"Injected the script into {ok} account(s)."
-            : $"Injected into {ok} account(s); {fail} failed.");
-    }
-
-    private async Task OpenAppAsync()
-    {
-        if (_selected == null) { _main.SetStatus("Select an account first."); return; }
-        Busy = true; _main.SetStatus($"Opening Roblox as {_selected.DisplayNameOrUser}…");
-        var r = await LauncherService.OpenRobloxAppAsync(_selected);
-        _store.Save();
-        Busy = false;
-        _main.SetStatus(r.Success ? $"Opened Roblox as {_selected.DisplayNameOrUser}." : r.Message);
-    }
-
-    private List<Account> Sel(IList? list)
-    {
-        // Checkboxes win: if any accounts are ticked, act on exactly those.
-        var ticked = _store.Accounts.Where(a => a.IsChecked).ToList();
-        if (ticked.Count > 0) return ticked;
-        if (list != null)
-        {
-            var picked = list.Cast<Account>().ToList();
-            if (picked.Count > 0) return picked;
-        }
-        return _selected != null ? new List<Account> { _selected } : new();
-    }
-
-    private async Task AddAsync()
-    {
-        var added = DialogService.ShowAddAccount(_store);
-        if (added == null) return;
-        Selected = added;
-        _main.SetStatus($"Added {added.DisplayNameOrUser}.");
-        await _store.RefreshLiveDataAsync(new[] { added });
-    }
-
-    private async Task ImportAsync()
-    {
-        var text = DialogService.ShowImport();
-        if (string.IsNullOrWhiteSpace(text)) return;
-        Busy = true;
-        var (added, failed) = await _store.ImportManyAsync(text, s => _main.SetStatus(s));
-        Busy = false;
-        _main.SetStatus($"Import complete — {added} added, {failed} failed.");
-        await _store.RefreshLiveDataAsync();
-    }
-
-    /// <summary>
-    /// Imports from ic3w0lf's "Roblox Account Manager". Auto-detects its data
-    /// file where possible; otherwise the user browses to it. The file is read
-    /// tolerantly and every visible cookie is validated with Roblox before it's
-    /// added. Encrypted (master-password) stores yield no cookies — we say so and
-    /// point the user at ic3w0lf's Export feature rather than guessing.
-    /// </summary>
-    private async Task ImportIc3w0lfAsync()
-    {
-        var auto = Ic3w0lfImportService.AutoLocate();
-        var path = DialogService.PickFile(
-            "Import from ic3w0lf's Roblox Account Manager",
-            "ic3w0lf account data|AccountData;AccountData.json;accounts.json|All files|*.*",
-            auto);
-        if (string.IsNullOrWhiteSpace(path)) return;
-
-        var read = Ic3w0lfImportService.ReadFile(path);
-        if (!read.Ok)
-        {
-            DialogService.Info("Nothing imported", read.Message);
-            return;
-        }
-
-        _main.SetStatus(read.Message);
-        Busy = true;
-        var (added, failed) = await _store.ImportManyAsync(read.Text, s => _main.SetStatus(s));
-        Busy = false;
-        _main.SetStatus($"ic3w0lf import complete — {added} added, {failed} failed.");
-        await _store.RefreshLiveDataAsync();
-    }
-
-    private void Remove(IList? list)
-    {
-        var sel = Sel(list);
-        if (sel.Count == 0) { _main.SetStatus("Select an account first."); return; }
-        string names = sel.Count == 1 ? sel[0].DisplayNameOrUser : $"{sel.Count} accounts";
-        if (!DialogService.Confirm("Remove account", $"Remove {names}? This only deletes it from the manager, not from Roblox."))
-            return;
-        foreach (var a in sel) _store.Remove(a);
-        _main.SetStatus($"Removed {names}.");
-    }
-
-    // ==== #29 Power-Tools: server-selection launches ====
-    private string? _lastHopJobId;   // remembered so the next hop lands somewhere new
-
-    // Ping-Join: launch the selection into the lowest-ping public server for the place.
-    private async Task PingJoinAsync(IList? list)
-    {
-        var sel = Sel(list);
-        if (sel.Count == 0) { _main.SetStatus("Select at least one account."); return; }
-        if (!TryPlaceId(out long placeId)) return;
-        _main.SetStatus("Finding the lowest-ping server…");
-        var pick = await PowerToolsService.PickBestPingAsync(placeId);
-        if (pick.JobId == null) { _main.SetStatus(pick.Error ?? "No joinable server found."); return; }
-        _main.SetStatus(pick.Server!.Ping > 0
-            ? $"Best server: {pick.Server.Ping} ms · {pick.Server.Playing}/{pick.Server.MaxPlayers} players — launching…"
-            : $"Ping unavailable — joining emptiest server ({pick.Server.Playing}/{pick.Server.MaxPlayers})…");
-        _lastHopJobId = pick.JobId;
-        await LaunchSequential(sel, placeId, pick.JobId, 0);
-    }
-
-    // Server-Hop: launch the selection into a fresh random server, different from the last hop.
-    private async Task ServerHopAsync(IList? list)
-    {
-        var sel = Sel(list);
-        if (sel.Count == 0) { _main.SetStatus("Select at least one account."); return; }
-        if (!TryPlaceId(out long placeId)) return;
-        _main.SetStatus("Hopping to a fresh server…");
-        var pick = await PowerToolsService.PickHopAsync(placeId, _lastHopJobId);
-        if (pick.JobId == null) { _main.SetStatus(pick.Error ?? "No joinable server found."); return; }
-        _lastHopJobId = pick.JobId;
-        _main.SetStatus($"Hopping into a {pick.Server!.Playing}/{pick.Server.MaxPlayers} server…");
-        await LaunchSequential(sel, placeId, pick.JobId, 0);
-    }
-
-    // Squad: land the whole checked/selected group in one server that has room for everyone.
-    private async Task SquadJoinAsync(IList? list)
-    {
-        var sel = Sel(list);
-        if (sel.Count == 0) { _main.SetStatus("Check or select the squad first."); return; }
-        if (!TryPlaceId(out long placeId)) return;
-        _main.SetStatus($"Finding a server with room for {sel.Count}…");
-        var pick = await PowerToolsService.PickSquadAsync(placeId, sel.Count);
-        if (pick.JobId == null) { _main.SetStatus(pick.Error ?? "No joinable server found."); return; }
-        if (pick.Warning != null) _main.SetStatus(pick.Warning);
-        else _main.SetStatus($"Squad server: {pick.Server!.Playing}/{pick.Server.MaxPlayers} — launching {sel.Count} together…");
-        _lastHopJobId = pick.JobId;
-        await LaunchSequential(sel, placeId, pick.JobId, 0);
     }
 
     private bool TryPlaceId(out long placeId)
     {
-        placeId = 0;
-        var t = new string(PlaceIdText.Where(char.IsDigit).ToArray());
-        if (!long.TryParse(t, out placeId) || placeId <= 0)
+        placeId = ParsePlaceId(PlaceIdText);
+        if (placeId <= 0)
         {
-            _main.SetStatus("Enter a valid Place ID first.");
+            _main.SetStatus(L.T("Launch.NeedPlace"));
+            ToastService.Warning(L.T("Launch.NeedPlaceTitle"), L.T("Launch.NeedPlace"));
             return false;
         }
-        SettingsService.Current.DefaultPlaceId = placeId;
-        SettingsService.Save();
+        if (SettingsService.Current.DefaultPlaceId != placeId)
+        {
+            SettingsService.Current.DefaultPlaceId = placeId;
+            SettingsService.Save();
+        }
         return true;
     }
 
-    private async Task LaunchAsync(IList? list)
+    private List<Account>? LaunchTargets()
     {
-        var sel = Sel(list);
-        if (sel.Count == 0) { _main.SetStatus("Select at least one account."); return; }
-        if (!TryPlaceId(out long placeId)) return;
-        // Launch auto-joins whatever is in the Job-ID / link box: a Job ID, a private-server link, or nothing.
-        var t = await ResolveJoinTargetAsync(placeId, sel);
-        if (!t.ok) return;
-        await LaunchSequential(sel, t.placeId, t.jobId, 0, t.linkCode);
+        var targets = Targets();
+        if (targets.Count == 0)
+        {
+            _main.SetStatus(L.T("Status.SelectFirst"));
+            return null;
+        }
+        return targets;
     }
 
-    private async Task JoinServerAsync(IList? list)
+    private async Task LaunchAsync()
     {
-        var sel = Sel(list);
-        if (sel.Count == 0) { _main.SetStatus("Select at least one account."); return; }
-        if (!TryPlaceId(out long placeId)) return;
-        if (string.IsNullOrWhiteSpace(JobIdText)) { _main.SetStatus("Enter a Job ID or private-server link, or use Smart Join."); return; }
-        var t = await ResolveJoinTargetAsync(placeId, sel);
-        if (!t.ok) return;
-        if (t.jobId == null && t.linkCode == null) { _main.SetStatus("That doesn't look like a Job ID or private-server link."); return; }
-        await LaunchSequential(sel, t.placeId, t.jobId, 0, t.linkCode);
+        var sel = LaunchTargets();
+        if (sel == null) return;
+
+        // A pasted link can carry the place itself, so the Place ID box may legitimately be empty.
+        var target = await ResolveJoinTargetAsync(sel);
+        if (target == null) return;
+        await LaunchSequential(sel, target);
     }
 
-    // Turns the Job-ID / link box into concrete launch parameters.
-    private async Task<(bool ok, long placeId, string? jobId, string? linkCode)> ResolveJoinTargetAsync(long placeId, List<Account> sel)
+    /// <summary>
+    /// Turns the Place ID and the Job ID / link boxes into a launch target: a plain game, a specific
+    /// server (Job ID), a private server (classic link code or modern share link), or a deep link.
+    /// </summary>
+    private async Task<LauncherService.JoinTarget?> ResolveJoinTargetAsync(List<Account> sel)
     {
-        string input = (JobIdText ?? "").Trim();
-        if (input.Length == 0) return (true, placeId, null, null);
+        string input = JobIdText.Trim();
+        long placeId = ParsePlaceId(PlaceIdText);
 
-        bool looksLikeUrl = input.Contains("roblox.com", StringComparison.OrdinalIgnoreCase)
-                            || input.StartsWith("http", StringComparison.OrdinalIgnoreCase);
-        if (looksLikeUrl)
+        if (input.Length > 0 && (input.Contains("roblox.com", StringComparison.OrdinalIgnoreCase)
+                                 || input.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                                 || input.StartsWith("roblox:", StringComparison.OrdinalIgnoreCase)))
         {
             var parsed = RobloxApi.ParseJoinLink(input);
             long pid = parsed.PlaceId > 0 ? parsed.PlaceId : placeId;
 
-            if (!string.IsNullOrEmpty(parsed.LinkCode))
-                return (true, pid, null, parsed.LinkCode);
+            if (!string.IsNullOrEmpty(parsed.LinkCode) && pid > 0)
+                return new LauncherService.JoinTarget(pid, LinkCode: parsed.LinkCode);
 
             if (!string.IsNullOrEmpty(parsed.ShareCode))
             {
-                _main.SetStatus("Resolving private-server link…");
+                _main.SetStatus(L.T("Launch.ResolvingLink"));
                 string cookie = sel.FirstOrDefault(a => a.IsValid)?.Cookie
                                 ?? _store.Accounts.FirstOrDefault(a => a.IsValid)?.Cookie ?? "";
                 var res = await RobloxApi.ResolveShareLinkAsync(cookie, parsed.ShareCode);
-                if (res == null) { _main.SetStatus("Couldn't resolve that private-server link — is it still valid?"); return (false, 0, null, null); }
-                return (true, res.PlaceId, null, res.LinkCode);
+                if (res == null)
+                {
+                    _main.SetStatus(L.T("Launch.LinkInvalid"));
+                    ToastService.Error(L.T("Launch.FailedTitle"), L.T("Launch.LinkInvalid"));
+                    return null;
+                }
+                return new LauncherService.JoinTarget(res.PlaceId, LinkCode: res.LinkCode);
             }
 
-            if (pid > 0) return (true, pid, null, null);   // plain game link -> normal join
-            _main.SetStatus("Couldn't read a Place ID from that link — set one above.");
-            return (false, 0, null, null);
+            if (pid > 0) return new LauncherService.JoinTarget(pid, JobId: parsed.JobId);
+
+            _main.SetStatus(L.T("Launch.LinkNoPlace"));
+            return null;
         }
 
-        // Not a URL: treat as a Job ID (GUID). LauncherService sanitises it further.
-        return (true, placeId, input, null);
+        if (!TryPlaceId(out placeId)) return null;
+        if (input.Length > 0 && !RobloxApi.LooksLikeJobId(input))
+        {
+            _main.SetStatus(L.T("Launch.BadJobId"));
+            ToastService.Warning(L.T("Launch.BadJobIdTitle"), L.T("Launch.BadJobId"));
+            return null;
+        }
+        return new LauncherService.JoinTarget(placeId, JobId: input.Length > 0 ? input : null);
     }
 
-    private async Task ShuffleJoinAsync(IList? list)
+    private async Task ShuffleJoinAsync()
     {
-        var sel = Sel(list);
-        if (sel.Count == 0) { _main.SetStatus("Select at least one account."); return; }
-        if (!TryPlaceId(out long placeId)) return;
-        _main.SetStatus("Finding a good server…");
+        var sel = LaunchTargets();
+        if (sel == null || !TryPlaceId(out long placeId)) return;
+        _main.SetStatus(L.T("Launch.FindingServer"));
         var s = SettingsService.Current;
         string job = await RobloxApi.GetRandomJobIdAsync(placeId, s.ShuffleLowestServer, s.ShufflePageCount);
-        if (string.IsNullOrEmpty(job)) { _main.SetStatus("No joinable public servers found."); return; }
-        await LaunchSequential(sel, placeId, job, 0);
+        if (string.IsNullOrEmpty(job)) { _main.SetStatus(L.T("Servers.NoneJoinable")); return; }
+        await LaunchSequential(sel, new LauncherService.JoinTarget(placeId, job));
     }
 
-    private async Task FollowAsync(IList? list)
+    private string? _lastHopJobId;
+
+    private async Task PingJoinAsync()
     {
-        var sel = Sel(list);
-        if (sel.Count == 0) { _main.SetStatus("Select at least one account."); return; }
-        string user = FollowText.Trim();
-        if (string.IsNullOrEmpty(user)) { _main.SetStatus("Enter a username to follow."); return; }
-        _main.SetStatus($"Looking up {user}…");
-        long id = await RobloxApi.GetUserIdAsync(user);
-        if (id <= 0) { _main.SetStatus($"Could not find user '{user}'."); return; }
-        await LaunchSequential(sel, 0, null, id);
+        var sel = LaunchTargets();
+        if (sel == null || !TryPlaceId(out long placeId)) return;
+        _main.SetStatus(L.T("Launch.FindingPing"));
+        var pick = await PowerToolsService.PickBestPingAsync(placeId);
+        if (pick.JobId == null) { _main.SetStatus(pick.Error ?? L.T("Servers.NoneJoinable")); return; }
+        _lastHopJobId = pick.JobId;
+        await LaunchSequential(sel, new LauncherService.JoinTarget(placeId, pick.JobId));
     }
 
-    private async Task LaunchSequential(List<Account> accounts, long placeId, string? job, long followId, string? linkCode = null)
+    private async Task ServerHopAsync()
     {
-        if (followId == 0 && placeId > 0 && !RequirementsService.IsRobloxInstalled())
-        {
-            Busy = false;
-            DialogService.OfferDownload("Roblox not found",
-                "The Roblox player isn't installed, so games can't be launched. Download Roblox now?",
-                "https://www.roblox.com/download");
-            return;
-        }
-
-        Busy = true;
-        int delay = Math.Max(0, SettingsService.Current.AccountJoinDelay);
-        int ok = 0;
-        string? firstError = null;
-        for (int i = 0; i < accounts.Count; i++)
-        {
-            var a = accounts[i];
-            a.IsBusy = true;
-            _main.SetStatus($"Launching {a.DisplayNameOrUser} ({i + 1}/{accounts.Count})…");
-            var r = await LauncherService.LaunchAsync(a, placeId, job, followId, linkCode);
-            a.IsBusy = false;
-            if (r.Success) ok++;
-            else firstError ??= $"{a.DisplayNameOrUser}: {r.Message}";
-            _store.Save();
-            if (i < accounts.Count - 1 && delay > 0)
-            {
-                for (int s = delay; s > 0; s--)
-                {
-                    _main.SetStatus($"Next launch in {s}s…");
-                    await Task.Delay(1000);
-                }
-            }
-        }
-        Busy = false;
-
-        if (firstError != null)
-        {
-            _main.SetStatus(firstError);
-            DialogService.Info("Launch failed", firstError);
-        }
-        else
-        {
-            _main.SetStatus($"Launched {ok} client(s).");
-        }
+        var sel = LaunchTargets();
+        if (sel == null || !TryPlaceId(out long placeId)) return;
+        _main.SetStatus(L.T("Launch.Hopping"));
+        var exclude = _lastHopJobId ?? sel.Select(a => a.GameId).FirstOrDefault(g => !string.IsNullOrEmpty(g));
+        var pick = await PowerToolsService.PickHopAsync(placeId, exclude);
+        if (pick.JobId == null) { _main.SetStatus(pick.Error ?? L.T("Servers.NoneJoinable")); return; }
+        _lastHopJobId = pick.JobId;
+        await LaunchSequential(sel, new LauncherService.JoinTarget(placeId, pick.JobId));
     }
 
-    private async Task RefreshAllAsync()
+    private async Task SquadJoinAsync()
     {
-        if (_store.Accounts.Count == 0) { _main.SetStatus("No accounts to refresh."); return; }
-        Busy = true; _main.SetStatus("Refreshing account data…");
-        await _store.RefreshLiveDataAsync();
-        Busy = false; _main.SetStatus("Account data refreshed.");
+        var sel = LaunchTargets();
+        if (sel == null || !TryPlaceId(out long placeId)) return;
+        _main.SetStatus(L.T("Launch.FindingSquad", sel.Count));
+        var pick = await PowerToolsService.PickSquadAsync(placeId, sel.Count);
+        if (pick.JobId == null) { _main.SetStatus(pick.Error ?? L.T("Servers.NoneJoinable")); return; }
+        if (pick.Warning != null) ToastService.Warning(L.T("Launch.SquadTitle"), pick.Warning);
+        _lastHopJobId = pick.JobId;
+        await LaunchSequential(sel, new LauncherService.JoinTarget(placeId, pick.JobId));
     }
 
-    private void CopyCookie()
+    private async Task FollowAsync()
     {
-        if (_selected == null) { _main.SetStatus("Select an account first."); return; }
-        try { Clipboard.SetText(_selected.Cookie); _main.SetStatus("Cookie copied to clipboard."); }
-        catch { _main.SetStatus("Could not access the clipboard."); }
-    }
-
-    private void SaveDetails()
-    {
-        _store.Save();
-        _main.SetStatus("Saved.");
-    }
-
-    private void ToggleFavorite(Account? acc)
-    {
-        acc ??= _selected;
-        if (acc == null) { _main.SetStatus("Select an account first."); return; }
-        acc.IsFavorite = !acc.IsFavorite;
-        // Remove + re-add so the grouped/sorted CollectionView floats favorites to the top.
-        int idx = _store.Accounts.IndexOf(acc);
-        if (idx >= 0)
-        {
-            _store.Accounts.RemoveAt(idx);
-            _store.Accounts.Add(acc);
-        }
-        Selected = acc;
-        _store.Save();
-        _main.SetStatus(acc.IsFavorite ? $"Pinned {acc.DisplayNameOrUser}." : $"Unpinned {acc.DisplayNameOrUser}.");
-    }
-
-    private void SetGroup(IList? list)
-    {
-        var sel = Sel(list);
-        if (sel.Count == 0 && _selected != null) sel.Add(_selected);
-        if (sel.Count == 0) { _main.SetStatus("Select an account first."); return; }
-        string current = sel[0].Group;
-        string? g = DialogService.Prompt("Set group", "Group name", current);
-        if (g == null) return;
-        g = string.IsNullOrWhiteSpace(g) ? "Default" : g.Trim();
-        foreach (var a in sel) a.Group = g;
-        // Remove + re-add so the grouped CollectionView re-buckets these rows.
-        foreach (var a in sel)
-        {
-            int idx = _store.Accounts.IndexOf(a);
-            if (idx >= 0) _store.Accounts.RemoveAt(idx);
-            _store.Accounts.Add(a);
-        }
-        Selected = sel[0];
-        _store.Save();
-        _main.SetStatus($"Moved {sel.Count} account(s) to '{g}'.");
+        var sel = LaunchTargets();
+        if (sel == null) return;
+        string user = FollowText.Trim().TrimStart('@');
+        if (string.IsNullOrEmpty(user)) { _main.SetStatus(L.T("Follow.EnterUser")); return; }
+        _main.SetStatus(L.T("Follow.LookingUp", user));
+        long id = long.TryParse(user, out long numeric) && numeric > 0 ? numeric : await RobloxApi.GetUserIdAsync(user);
+        if (id <= 0) { _main.SetStatus(L.T("Follow.NotFound", user)); ToastService.Error(L.T("Launch.FailedTitle"), L.T("Follow.NotFound", user)); return; }
+        await LaunchSequential(sel, new LauncherService.JoinTarget(0, FollowUserId: id));
     }
 
     private void BrowseServers()
@@ -802,33 +1067,87 @@ public class AccountsViewModel : ObservableObject
         _main.OpenServersFor(placeId);
     }
 
-    // ---- saved places ----
-    private void SavePlace()
+    private async Task LaunchSequential(List<Account> accounts, LauncherService.JoinTarget target)
     {
-        var digits = new string(PlaceIdText.Where(char.IsDigit).ToArray());
-        if (!long.TryParse(digits, out long placeId) || placeId <= 0)
+        if (!RequirementsService.IsRobloxInstalled())
         {
-            _main.SetStatus("Enter a valid Place ID before saving it.");
+            DialogService.OfferDownload(L.T("Requirements.NoRoblox.Title"), L.T("Requirements.NoRoblox.Body"), "https://www.roblox.com/download");
             return;
         }
 
-        string? name = DialogService.Prompt("Save place", "Name for this place", GameName);
+        Busy = true;
+        int delay = Math.Max(0, SettingsService.Current.AccountJoinDelay);
+        int ok = 0;
+        var errors = new List<string>();
+        try
+        {
+            for (int i = 0; i < accounts.Count; i++)
+            {
+                var a = accounts[i];
+                a.IsBusy = true;
+                _main.SetStatus(accounts.Count == 1
+                    ? L.T("Launch.Launching", a.DisplayNameOrUser)
+                    : L.T("Launch.LaunchingOf", a.DisplayNameOrUser, i + 1, accounts.Count));
+                var r = await LauncherService.LaunchAsync(a, target);
+                a.IsBusy = false;
+                if (r.Success) ok++;
+                else errors.Add($"{a.DisplayNameOrUser}: {r.Message}");
+
+                if (i < accounts.Count - 1 && delay > 0)
+                {
+                    for (int s = delay; s > 0; s--)
+                    {
+                        _main.SetStatus(L.T("Launch.NextIn", s));
+                        await Task.Delay(1000);
+                    }
+                }
+            }
+            _store.Save();
+        }
+        finally
+        {
+            foreach (var a in accounts) a.IsBusy = false;
+            Busy = false;
+        }
+
+        if (errors.Count > 0)
+        {
+            _main.SetStatus(errors[0]);
+            ToastService.Error(L.T("Launch.FailedTitle"), string.Join("\n", errors.Take(3)));
+        }
+        else
+        {
+            _main.SetStatus(L.N("Launch.Done", ok));
+        }
+    }
+
+    // ================================================================ saved places
+
+    public ObservableCollection<SavedPlace> SavedPlaces { get; } = new();
+
+    private bool _savedPlacesOpen;
+    public bool SavedPlacesOpen
+    {
+        get => _savedPlacesOpen;
+        set { if (SetField(ref _savedPlacesOpen, value) && value) _ = LoadSavedPlaceIconsAsync(); }
+    }
+
+    private void SavePlace()
+    {
+        long placeId = ParsePlaceId(PlaceIdText);
+        if (placeId <= 0) { _main.SetStatus(L.T("Launch.NeedPlace")); return; }
+
+        string? name = DialogService.Prompt(L.T("Places.Save.Title"), L.T("Places.Save.Label"), GameName);
         if (string.IsNullOrWhiteSpace(name)) return;
         name = name.Trim();
 
         var existing = SavedPlaces.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
         if (existing != null) SavedPlaces.Remove(existing);
-        SavedPlaces.Add(new SavedPlace
-        {
-            Name = name,
-            PlaceId = placeId,
-            IconUrl = GameIcon,
-            UniverseId = _lastUniverseId
-        });
+        SavedPlaces.Add(new SavedPlace { Name = name, PlaceId = placeId, IconUrl = GameIcon, UniverseId = _lastUniverseId });
 
         PersistSavedPlaces();
-        _ = LoadSavedPlaceIconsAsync();   // fill the icon if the live lookup hadn't finished yet
-        _main.SetStatus($"Saved '{name}' ({placeId}).");
+        _ = LoadSavedPlaceIconsAsync();
+        _main.SetStatus(L.T("Places.Saved", name));
     }
 
     private void RemovePlace(SavedPlace? place)
@@ -836,15 +1155,14 @@ public class AccountsViewModel : ObservableObject
         if (place == null) return;
         SavedPlaces.Remove(place);
         PersistSavedPlaces();
-        _main.SetStatus($"Removed saved place '{place.Name}'.");
     }
 
     private void ApplySavedPlace(SavedPlace? place)
     {
         if (place == null) return;
         SavedPlacesOpen = false;
-        PlaceIdText = place.PlaceId.ToString();   // setter kicks off the debounced game lookup
-        _main.SetStatus($"Place set to '{place.Name}'.");
+        PlaceIdText = place.PlaceId.ToString();
+        JobIdText = "";
     }
 
     private bool _loadingIcons;
@@ -860,24 +1178,22 @@ public class AccountsViewModel : ObservableObject
             bool changed = false;
             foreach (var place in missing)
             {
-                try
+                long universeId = place.UniverseId;
+                if (universeId <= 0)
                 {
-                    long universeId = place.UniverseId;
-                    if (universeId <= 0)
-                    {
-                        var info = await RobloxApi.GetPlaceInfoAsync(cookie, place.PlaceId);
-                        if (info == null) continue;
-                        universeId = info.UniverseId;
-                    }
-                    string? icon = await RobloxApi.GetGameIconAsync(universeId);
-                    if (string.IsNullOrEmpty(icon)) continue;
-                    App.Current.Dispatcher.Invoke(() => { place.UniverseId = universeId; place.IconUrl = icon; });
-                    changed = true;
+                    var info = await RobloxApi.GetPlaceInfoAsync(cookie, place.PlaceId);
+                    if (info == null) continue;
+                    universeId = info.UniverseId;
                 }
-                catch { }
+                string? icon = await RobloxApi.GetGameIconAsync(universeId);
+                if (string.IsNullOrEmpty(icon)) continue;
+                place.UniverseId = universeId;
+                place.IconUrl = icon;
+                changed = true;
             }
-            if (changed) App.Current.Dispatcher.Invoke(PersistSavedPlaces);
+            if (changed) PersistSavedPlaces();
         }
+        catch (Exception ex) { DiagnosticsService.Warn("accounts", "Saved place icons could not be loaded", ex); }
         finally { _loadingIcons = false; }
     }
 

@@ -52,7 +52,10 @@ public static class ScaleService
     private static string Csv(string? v)
     {
         v ??= "";
-        if (v.Contains(',') || v.Contains('"') || v.Contains('\n'))
+        // Formula injection: spreadsheets run a cell starting with = + - @ (or a tab / CR) as a
+        // formula. An alias like "=HYPERLINK(...)" must stay plain text when the export is opened.
+        if (v.Length > 0 && "=+-@\t\r".Contains(v[0])) v = "'" + v;
+        if (v.Contains(',') || v.Contains('"') || v.Contains('\n') || v.Contains('\r'))
             return "\"" + v.Replace("\"", "\"\"") + "\"";
         return v;
     }

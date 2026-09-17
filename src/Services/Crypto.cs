@@ -93,15 +93,33 @@ public static class Crypto
     }
 
     public static string UnprotectString(string stored)
+        => TryUnprotectString(stored, out string plain) ? plain : "";
+
+    /// <summary>
+    /// Like <see cref="UnprotectString"/>, but tells a genuinely empty value apart from one that could
+    /// not be decrypted (a store copied from another Windows user). Callers that re-save the data
+    /// need that difference — writing "" back would destroy a value that is merely unreadable here.
+    /// </summary>
+    public static bool TryUnprotectString(string? stored, out string plain)
     {
-        if (string.IsNullOrEmpty(stored)) return "";
-        if (!stored.StartsWith(StringMarker, StringComparison.Ordinal)) return stored; // legacy plaintext
+        plain = "";
+        if (string.IsNullOrEmpty(stored)) return true;
+        if (!stored.StartsWith(StringMarker, StringComparison.Ordinal)) { plain = stored; return true; } // legacy plaintext
         try
         {
             byte[] prot = Convert.FromBase64String(stored[StringMarker.Length..]);
-            return Encoding.UTF8.GetString(ProtectedData.Unprotect(prot, Entropy, DataProtectionScope.CurrentUser));
+            plain = Encoding.UTF8.GetString(ProtectedData.Unprotect(prot, Entropy, DataProtectionScope.CurrentUser));
+            return true;
         }
-        catch { return ""; }
+        catch { return false; }
+    }
+
+    /// <summary>Constant-time string comparison for secrets (passwords, tokens).</summary>
+    public static bool SecretEquals(string? a, string? b)
+    {
+        byte[] ha = SHA256.HashData(Encoding.UTF8.GetBytes(a ?? ""));
+        byte[] hb = SHA256.HashData(Encoding.UTF8.GetBytes(b ?? ""));
+        return CryptographicOperations.FixedTimeEquals(ha, hb) && (a != null) == (b != null);
     }
 
     private static byte[] DeriveKey(string password, byte[] salt)

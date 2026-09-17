@@ -1,95 +1,177 @@
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Text.Json;
 
 namespace RobloxAccountManager.Services;
 
 /// <summary>
-/// Lightweight runtime localization. Rather than swapping satellite assemblies
-/// (which needs an app restart), every translatable string is published into the
-/// live resource dictionary under a <c>Str.*</c> key, so XAML binds via
-/// <c>{DynamicResource Str.Nav.Accounts}</c> and switching language repaints
-/// instantly. English is the source language and the fallback for any gap.
+/// Runtime localization. Every string lives in an embedded <c>Localization/&lt;code&gt;.json</c> file
+/// (flat key → text). The active language is published into the application resources under
+/// <c>Str.&lt;key&gt;</c>, so XAML binds with <c>{DynamicResource Str.Nav.Accounts}</c> and a language
+/// switch repaints instantly — no restart, no satellite assemblies. Code uses <see cref="L.T(string)"/>.
+///
+/// English is the source language: it defines the key set and fills any gap in a translation, so a
+/// missing string degrades to English rather than to an empty label.
 /// </summary>
 public static class LocalizationService
 {
-    public static readonly (string Code, string Label)[] Languages =
+    public sealed record Language(string Code, string NativeName);
+
+    public static readonly Language[] Languages =
     {
-        ("en", "English"),
-        ("de", "Deutsch"),
+        new("en", "English"),
+        new("de", "Deutsch"),
+        new("es", "Español"),
+        new("fr", "Français"),
+        new("pt", "Português (Brasil)"),
+        new("pl", "Polski"),
+        new("tr", "Türkçe"),
+        new("ru", "Русский"),
     };
 
-    public static string LabelFor(string code) =>
-        Languages.FirstOrDefault(l => l.Code == code).Label ?? "English";
+    private static readonly Dictionary<string, string> _english = LoadTable("en");
+    private static Dictionary<string, string> _active = _english;
 
-    public static string CodeFor(string label) =>
-        Languages.FirstOrDefault(l => l.Label == label).Code is { } c && c.Length > 0 ? c : "en";
+    /// <summary>The language code currently applied to the UI.</summary>
+    public static string Current { get; private set; } = "en";
 
-    /// <summary>key → (lang-code → text). English must always be present.</summary>
-    static readonly Dictionary<string, Dictionary<string, string>> Table = new()
+    /// <summary>Raised on the UI thread after <see cref="Apply"/> switched language, so formatted
+    /// strings built in code (status lines, counts) can be rebuilt.</summary>
+    public static event Action? Changed;
+
+    public static bool IsSupported(string? code) => Languages.Any(l => l.Code == code);
+
+    /// <summary>
+    /// The language to start in. An explicit choice wins; a fresh install follows Windows' display
+    /// language when we have a translation for it, and English otherwise.
+    /// </summary>
+    public static string ResolveInitial(string? saved)
     {
-        // Navigation rail
-        ["Nav.Accounts"]  = new() { ["en"] = "Accounts",  ["de"] = "Konten" },
-        ["Nav.Servers"]   = new() { ["en"] = "Servers",   ["de"] = "Server" },
-        ["Nav.Dashboard"] = new() { ["en"] = "Dashboard", ["de"] = "Übersicht" },
-        ["Nav.Friends"]   = new() { ["en"] = "Friends",   ["de"] = "Freunde" },
-        ["Nav.Settings"]  = new() { ["en"] = "Settings",  ["de"] = "Einstellungen" },
+        if (IsSupported(saved)) return saved!;
+        string os = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+        return IsSupported(os) ? os : "en";
+    }
 
-        // Settings section headers
-        ["Settings.Launch"]      = new() { ["en"] = "Launch",       ["de"] = "Starten" },
-        ["Settings.Performance"] = new() { ["en"] = "Performance",  ["de"] = "Leistung" },
-        ["Settings.LiveData"]    = new() { ["en"] = "Live data",    ["de"] = "Live-Daten" },
-        ["Settings.Interface"]   = new() { ["en"] = "Interface",    ["de"] = "Oberfläche" },
-        ["Settings.Appearance"]  = new() { ["en"] = "Appearance",   ["de"] = "Erscheinungsbild" },
-        ["Settings.Browser"]     = new() { ["en"] = "Browser",      ["de"] = "Browser" },
-        ["Settings.Security"]    = new() { ["en"] = "Security",     ["de"] = "Sicherheit" },
-        ["Settings.About"]       = new() { ["en"] = "About",        ["de"] = "Über" },
-
-        // Appearance controls
-        ["Appearance.Theme"]     = new() { ["en"] = "Theme preset",  ["de"] = "Theme-Vorlage" },
-        ["Appearance.ThemeDesc"] = new() { ["en"] = "Base palette. Edit the swatches below to fine-tune any colour.",
-                                           ["de"] = "Basis-Palette. Feintuning über die Farbfelder unten." },
-        ["Appearance.ViewMode"]  = new() { ["en"] = "Account view",  ["de"] = "Konten-Ansicht" },
-        ["Appearance.ViewDesc"]  = new() { ["en"] = "Card shows thumbnails; Compact is a dense list.",
-                                           ["de"] = "Karte zeigt Thumbnails; Kompakt ist eine dichte Liste." },
-        ["Appearance.Language"]  = new() { ["en"] = "Language",      ["de"] = "Sprache" },
-        ["Appearance.Toasts"]    = new() { ["en"] = "In-app notifications",
-                                           ["de"] = "In-App-Benachrichtigungen" },
-        ["Appearance.Reset"]     = new() { ["en"] = "Reset theme",   ["de"] = "Theme zurücksetzen" },
-
-        // Common verbs
-        ["Common.Launch"] = new() { ["en"] = "Launch", ["de"] = "Starten" },
-        ["Common.Close"]  = new() { ["en"] = "Close",  ["de"] = "Schließen" },
-        ["Common.Save"]   = new() { ["en"] = "Save",   ["de"] = "Speichern" },
-        ["Common.Cancel"] = new() { ["en"] = "Cancel", ["de"] = "Abbrechen" },
-        ["Common.Add"]    = new() { ["en"] = "Add account", ["de"] = "Konto hinzufügen" },
-    };
-
-    public static string Get(string key, string code)
+    public static void Apply(string? code)
     {
-        if (Table.TryGetValue(key, out var m))
-            return m.TryGetValue(code, out var t) ? t
-                 : m.TryGetValue("en", out var e) ? e : key;
+        if (!IsSupported(code)) code = "en";
+
+        var app = System.Windows.Application.Current;
+        if (app != null && !app.Dispatcher.CheckAccess())
+        {
+            app.Dispatcher.Invoke(() => Apply(code));
+            return;
+        }
+
+        _active = code == "en" ? _english : LoadTable(code!);
+        Current = code!;
+
+        if (app != null)
+        {
+            // Publish every English key so a string a translation lacks still shows up (in English).
+            foreach (var key in _english.Keys)
+                app.Resources["Str." + key] = Lookup(key);
+        }
+
+        try { Changed?.Invoke(); } catch { }
+    }
+
+    /// <summary>Text for a key in the active language; English, then the key itself, as fallbacks.</summary>
+    public static string Get(string key) => Lookup(key);
+
+    public static string Format(string key, params object?[] args)
+    {
+        string pattern = Lookup(key);
+        if (args.Length == 0) return pattern;
+        try { return string.Format(CultureInfo.CurrentCulture, pattern, args); }
+        catch (FormatException)
+        {
+            // A translation with a broken placeholder must never throw into a UI handler — fall
+            // back to the English pattern, which the CI check guarantees is well-formed.
+            try { return string.Format(CultureInfo.CurrentCulture, _english.GetValueOrDefault(key, key), args); }
+            catch { return pattern; }
+        }
+    }
+
+    /// <summary>
+    /// Count-aware text. Looks up <c>key.One</c> / <c>key.Few</c> / <c>key.Many</c> / <c>key.Other</c>
+    /// using the plural rules of the active language, with <c>{0}</c> set to the count.
+    /// </summary>
+    public static string Plural(string key, long count, params object?[] extra)
+    {
+        // Resolve the form inside the active language first, so a Russian "few" never falls back to
+        // an English sentence; only a language that lacks the key entirely falls back to English rules.
+        string full = $"{key}.{PluralForm(Current, count)}";
+        if (!_active.ContainsKey(full))
+            full = _active.ContainsKey($"{key}.Other") ? $"{key}.Other" : $"{key}.{PluralForm("en", count)}";
+
+        var args = new object?[extra.Length + 1];
+        args[0] = count;
+        extra.CopyTo(args, 1);
+        return Format(full, args);
+    }
+
+    /// <summary>CLDR plural category for the languages we ship.</summary>
+    public static string PluralForm(string code, long n)
+    {
+        long abs = Math.Abs(n);
+        switch (code)
+        {
+            case "ru":
+                if (abs % 10 == 1 && abs % 100 != 11) return "One";
+                if (abs % 10 is >= 2 and <= 4 && abs % 100 is < 12 or > 14) return "Few";
+                return "Many";
+            case "pl":
+                if (abs == 1) return "One";
+                if (abs % 10 is >= 2 and <= 4 && abs % 100 is < 12 or > 14) return "Few";
+                return "Many";
+            case "fr":
+            case "pt":
+                return abs is 0 or 1 ? "One" : "Other";
+            default:
+                return abs == 1 ? "One" : "Other";
+        }
+    }
+
+    private static string Lookup(string key)
+    {
+        if (_active.TryGetValue(key, out var text) && text.Length > 0) return text;
+        if (_english.TryGetValue(key, out var en)) return en;
         return key;
     }
 
-    /// <summary>The language code currently applied to the live UI.</summary>
-    public static string Current { get; private set; } = "en";
-
-    /// <summary>Raised after <see cref="Apply"/> swaps the active language, so
-    /// data-bound labels that can't use <c>{DynamicResource}</c> can refresh.</summary>
-    public static event System.Action? Changed;
-
-    /// <summary>Publishes the whole table for <paramref name="code"/> into the live
-    /// application resources under <c>Str.*</c> keys.</summary>
-    public static void Apply(string code)
+    private static Dictionary<string, string> LoadTable(string code)
     {
-        if (string.IsNullOrWhiteSpace(code)) code = "en";
-        var app = System.Windows.Application.Current;
-        if (app == null) { Current = code; return; }
-        if (!app.Dispatcher.CheckAccess()) { app.Dispatcher.Invoke(() => Apply(code)); return; }
-        Current = code;
-        foreach (var kv in Table)
-            app.Resources["Str." + kv.Key] = Get(kv.Key, code);
-        Changed?.Invoke();
+        var table = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            using Stream? stream = Assembly.GetExecutingAssembly().GetManifestResourceStream($"Localization.{code}.json");
+            if (stream == null) return table;
+
+            using var doc = JsonDocument.Parse(stream, new JsonDocumentOptions
+            {
+                CommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            });
+            foreach (var prop in doc.RootElement.EnumerateObject())
+                if (prop.Value.ValueKind == JsonValueKind.String && !prop.Name.StartsWith('_'))
+                    table[prop.Name] = prop.Value.GetString() ?? "";
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsService.Warn("i18n", $"Could not load language '{code}'", ex);
+        }
+        return table;
     }
+}
+
+/// <summary>Short alias for localized strings in code: <c>L.T("Key")</c>, <c>L.T("Key", arg)</c>, <c>L.N("Key", count)</c>.</summary>
+public static class L
+{
+    public static string T(string key) => LocalizationService.Get(key);
+    public static string T(string key, params object?[] args) => LocalizationService.Format(key, args);
+    public static string N(string key, long count, params object?[] extra) => LocalizationService.Plural(key, count, extra);
 }

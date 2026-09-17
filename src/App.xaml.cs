@@ -1,6 +1,7 @@
 using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
+using RobloxAccountManager.Models;
 using RobloxAccountManager.Services;
 using RobloxAccountManager.ViewModels;
 using RobloxAccountManager.Views;
@@ -15,9 +16,10 @@ public partial class App : Application
     {
         // ---- self-update entry points (parsed BEFORE any normal startup work) ----
         // Contract: --apply-update "<mainExe>" <mainPid> "<url>" "<version>"
-        //                          [<size> "<sha256|->" <verify> <keepBackup>]
-        // The trailing verification arguments arrived in v1.7.0 and stay optional, so an older
-        // build handing over to a newer updater (or the reverse) still produces a working update.
+        //                          [<size> "<sha256|->" <verify> <keepBackup>]      (v1.7.0+)
+        //                          [<language> <Light|Dark> <accent>]                 (v2.0.0+)
+        // Every trailing group stays optional, so an older build handing over to a newer updater
+        // (or the reverse) still produces a working update.
         // Runs as the %TEMP% updater copy: show only the updater window, skip everything else
         // (including the single-instance mutex — the main app is still shutting down).
         if (e.Args.Length >= 5 && e.Args[0] == "--apply-update")
@@ -26,6 +28,15 @@ public partial class App : Application
             base.OnStartup(e);
 
             string? Arg(int i) => e.Args.Length > i ? e.Args[i] : null;
+
+            // The updater copy cannot read the settings file (it runs from %TEMP%), so it is told how to look.
+            LocalizationService.Apply(LocalizationService.ResolveInitial(Arg(9)));
+            ThemeService.Apply(new AppSettings
+            {
+                ThemeMode = Arg(10) is ThemeService.ModeLight ? ThemeService.ModeLight : ThemeService.ModeDark,
+                AccentName = ThemeService.AccentNames.Contains(Arg(11)) ? Arg(11)! : ThemeService.AccentNames[0],
+            });
+
             var updater = new UpdaterWindow(e.Args[1], e.Args[2], e.Args[3], e.Args[4],
                                             Arg(5), Arg(6), Arg(7), Arg(8));
             MainWindow = updater;
@@ -36,7 +47,13 @@ public partial class App : Application
         // Contract: --post-update "<tempDir>" — normal startup, plus background temp-dir cleanup.
         string? updateTempDir = e.Args.Length >= 2 && e.Args[0] == "--post-update" ? e.Args[1] : null;
 
-        _instanceMutex = new Mutex(true, "RobloxAccountManager.Modern.SingleInstance", out bool isNew);
+#if DEBUG
+        // Debug builds only: a throw-away data folder with sample accounts, for screenshots and UI work.
+        DemoMode.Configure(e.Args);
+#endif
+
+        _instanceMutex = new Mutex(true, AppInfo.IsDemo ? "RobloxAccountManager.Demo." + Environment.ProcessId
+                                                        : "RobloxAccountManager.Modern.SingleInstance", out bool isNew);
 
         // "Restart as administrator" hands over to this elevated copy while the old one is still
         // tearing down. Without a grace period the handover would greet the user with
@@ -60,8 +77,8 @@ public partial class App : Application
                 Shutdown();
                 return;
             }
-            MessageBox.Show("Roblox Account Manager is already running.", "Roblox Account Manager",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            LocalizationService.Apply(LocalizationService.ResolveInitial(null));
+            MessageBox.Show(L.T("App.AlreadyRunning"), "Roblox Account Manager", MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
             return;
         }
@@ -70,15 +87,16 @@ public partial class App : Application
 
         // Central diagnostics sink. Installed before anything else runs so the very first
         // failure — a corrupt settings file, an unreadable data folder — is already recorded.
-        // It also owns the unobserved-task hook that used to live inline here, so fire-and-forget
-        // pollers land in one rotating, cookie-scrubbed log instead of an ever-growing error.log.
         DiagnosticsService.Install();
 
         base.OnStartup(e);
 
         SettingsService.Load();
+#if DEBUG
+        DemoMode.AdjustSettings(SettingsService.Current);
+#endif
+        LocalizationService.Apply(LocalizationService.ResolveInitial(SettingsService.Current.Language));
         ThemeService.Apply(SettingsService.Current);   // paint the saved palette before the window shows
-        LocalizationService.Apply(SettingsService.Current.Language);  // publish Str.* for the chosen language
 
         var vm = new MainViewModel();
         if (!LoadAccounts(vm.Store))
@@ -90,6 +108,15 @@ public partial class App : Application
         var window = new MainWindow(vm);
         MainWindow = window;
         window.Show();
+
+#if DEBUG
+        if (AppInfo.IsDemo)
+        {
+            DemoMode.Populate(vm);
+            DemoMode.RunScript(window, vm);
+            return;
+        }
+#endif
 
         // Autostart with "start minimized": Show() first regardless — the tray icon is created in
         // OnSourceInitialized, which only runs once the window has a handle. Hiding straight after
@@ -116,12 +143,17 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Starts the background engines (crash watchdog, anti-AFK) and runs an optional
-    /// startup cookie-health sweep. Called once the main window is up so status updates
-    /// have somewhere to land.
+    /// Starts the background engines (crash watchdog, anti-AFK, scheduler, …) and runs an optional
+    /// startup cookie-health sweep. Called once the main window is up so status updates have
+    /// somewhere to land.
     /// </summary>
     private static void WireBackgroundServices(MainViewModel vm)
     {
+        // Web requests made for an account go through that account's own proxy when it has one.
+        RobloxApi.AccountProxyResolver = vm.Store.ProxyForCookie;
+
+        LockService.Init(vm.Store);
+
         // Multi-instance guard. Started here — not only on the launch path — because the whole
         // point is that clients we never launch (website Play button, Roblox home screen,
         // Discord invite) also need Roblox's per-client singleton lock cleared.
@@ -131,11 +163,13 @@ public partial class App : Application
         WatchdogService.Apply();
         AntiAfkService.Apply();
 
-        // Scheduler resolves a task's stored account by alias first, then username,
-        // so renaming the display name never breaks a saved schedule.
-        SchedulerService.Init(key => vm.Store.Accounts.FirstOrDefault(a =>
-            string.Equals(a.Alias,    key, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(a.Username, key, StringComparison.OrdinalIgnoreCase)));
+        // Presets and schedules resolve a stored account by alias first, then username, so renaming
+        // the display name never breaks a saved preset or task.
+        Account? Resolve(string key) => vm.Store.Accounts.FirstOrDefault(a =>
+            string.Equals(a.Alias, key, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(a.Username, key, StringComparison.OrdinalIgnoreCase));
+        PresetService.Init(Resolve);
+        SchedulerService.Init(Resolve);
         SchedulerService.Start();
 
         RamMonitorService.Apply();
@@ -144,8 +178,7 @@ public partial class App : Application
         WebApiService.Init(() => vm.Store.Accounts.ToList());
         WebApiService.Apply();
 
-        // Third-party plugins: give the host a live account snapshot, then load DLLs
-        // from the plugins folder. A throwing plugin is isolated inside the loader.
+        // Third-party plugins load only when they were switched on in Settings.
         PluginService.Init(() => vm.Store.Accounts.ToList());
         PluginService.Load();
 
@@ -159,18 +192,33 @@ public partial class App : Application
         PresenceService.Start();
 
         if (SettingsService.Current.ValidateCookiesOnStartup)
-            _ = CookieHealthService.ValidateAllAsync(vm.Store.Accounts.ToList());
+            _ = ValidateOnStartupAsync(vm);
 
-        // Global hotkeys: each enabled chord fires a named power-tool action. The
-        // dispatch runs on the UI thread (the hotkey window rides the WPF pump), so
-        // touching the view-model here is safe.
+        // Global hotkeys: each enabled chord fires a named action. The dispatch runs on the UI
+        // thread (the hotkey window rides the WPF pump), so touching the view-model here is safe.
         HotkeyService.Init(action => DispatchHotkey(vm, action));
         HotkeyService.Apply();
     }
 
-    /// <summary>Routes a global-hotkey action id to the matching power-tool.</summary>
+    private static async Task ValidateOnStartupAsync(MainViewModel vm)
+    {
+        try
+        {
+            await CookieHealthService.ValidateAllAsync(vm.Store.Accounts.ToList());
+            vm.Store.Save();   // persists the validation dates the health panel shows
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsService.Warn("health", "Startup session check failed", ex);
+        }
+    }
+
+    /// <summary>Routes a global-hotkey action id to the matching action.</summary>
     private static void DispatchHotkey(MainViewModel vm, string action)
     {
+        // A locked manager only answers the hotkeys that cannot reveal or start anything.
+        if (LockService.IsLocked && action is not ("FocusManager" or "LockManager")) return;
+
         switch (action)
         {
             case "LaunchSelected":
@@ -182,20 +230,15 @@ public partial class App : Application
                 break;
 
             case "CloseAllRoblox":
-                int n = LauncherService.CloseAllClients();
-                vm.SetStatus(n > 0 ? $"Closed {n} Roblox client(s)." : "No Roblox clients were running.");
+                vm.CloseAllClients();
+                break;
+
+            case "LockManager":
+                if (!LockService.Lock("hotkey")) vm.SetStatus(L.T("Lock.NeedPassword"));
                 break;
 
             case "FocusManager":
-                if (Current?.MainWindow is { } w)
-                {
-                    if (w.WindowState == WindowState.Minimized) w.WindowState = WindowState.Normal;
-                    w.Show();
-                    w.Activate();
-                    w.Topmost = true;   // nudge past other windows…
-                    w.Topmost = false;  // …without actually pinning it there
-                    w.Focus();
-                }
+                if (Current?.MainWindow is MainWindow w) w.BringToFront();
                 break;
         }
     }
@@ -243,44 +286,40 @@ public partial class App : Application
             // Refuse to start instead, so the file survives to be recovered.
             if (!store.Load(null))
             {
-                DialogService.Info("Account file could not be read",
-                    "Your saved accounts could not be decrypted. That usually means the file was "
-                    + "copied from a different Windows user or PC — DPAPI encryption is tied to the "
-                    + "account that wrote it.\n\n"
-                    + "Nothing has been changed and nothing was deleted. Your file is in:\n"
-                    + Paths.DataDir + "\n\n"
-                    + "The app will close now so the file stays intact.");
+                DialogService.Info(L.T("Startup.Unreadable.Title"), L.T("Startup.Unreadable.Body", Paths.DataDir));
                 return false;
             }
             return true;
         }
 
         // Password-protected: prompt until correct or the user cancels.
+        int failures = 0;
         while (true)
         {
-            string? pw = DialogService.PromptPassword("Unlock account file",
-                "This account file is protected with a master password.");
+            string? pw = DialogService.PromptPassword(L.T("Startup.Unlock.Title"), L.T("Startup.Unlock.Body"), L.T("Lock.Unlock"));
             if (pw == null) return false; // cancelled -> exit app
 
             if (store.Load(pw)) return true;
 
-            DialogService.Info("Incorrect password", "That password didn't work. Please try again.");
+            // Slow down guessing a little more with every wrong password.
+            failures++;
+            if (failures >= 3) Thread.Sleep(Math.Min(10, failures) * 400);
+            DialogService.Info(L.T("Startup.WrongPassword.Title"), L.T("Startup.WrongPassword.Body"));
         }
     }
 
     private void OnUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        // Append, never overwrite: the old code truncated error.log on every crash, so a repeating
-        // fault destroyed the evidence of the first one.
         DiagnosticsService.Error("ui", "Unhandled dispatcher exception", e.Exception);
-        MessageBox.Show(
-            $"An unexpected error occurred:\n\n{e.Exception.Message}\n\nDetails were written to:\n{DiagnosticsService.LogPath}",
+        MessageBox.Show(L.T("App.UnexpectedError", e.Exception.Message, DiagnosticsService.LogPath),
             "Roblox Account Manager", MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (AppInfo.IsDemo) { base.OnExit(e); return; }
+
         SingleInstanceService.StopServer();
         // Book every client still running: once this process is gone nothing observes them, and
         // for a manager left open all day that is most of the playtime there is to record.
@@ -292,8 +331,10 @@ public partial class App : Application
         WebApiService.Stop();
         PresenceService.Stop();
         HotkeyService.Stop();
+        LockService.Stop();
         PluginService.Unload(); // let plugins release timers/sockets (may still Close() clients)
         LauncherService.ReleaseMultiInstance();
+        ClipboardService.ClearSecretIfPresent();
         BrowserService.CleanupLeftoverProfiles(); // still-open browsers keep locks; next start re-sweeps
         base.OnExit(e);
     }

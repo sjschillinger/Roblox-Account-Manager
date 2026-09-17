@@ -1,0 +1,71 @@
+<UserControl x:Class="RobloxAccountManager.Views.Settings.UpdatesSettings"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:RobloxAccountManager.Controls">
+    <StackPanel>
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Updates}" FontFamily="{StaticResource DisplayFont}" FontSize="18" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}" />
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Updates.Desc}" Style="{StaticResource Text.Caption}" FontSize="13" Margin="0,4,0,22" />
+
+        <Border Style="{StaticResource Panel}" Padding="18,16" Margin="0,0,0,24">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding AppVersion}" FontFamily="{StaticResource DisplayFont}" FontSize="15" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <TextBlock Text="{Binding UpdateCheckStatus}" Style="{StaticResource Text.Caption}" Margin="0,4,0,0" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Style="{StaticResource Btn.Ghost}" Content="{DynamicResource Str.Updates.WhatsNew}" Command="{Binding ShowWhatsNewCommand}" />
+                    <Button Style="{StaticResource Btn.Primary}" Margin="8,0,0,0" ctl:Ui.Icon="{StaticResource Icon.Refresh}"
+                            Content="{DynamicResource Str.Updates.CheckNow}" Command="{Binding CheckForUpdatesCommand}"
+                            IsEnabled="{Binding UpdateCheckRunning, Converter={StaticResource InverseBool}}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TextBlock Text="{DynamicResource Str.Updates.Schedule}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.Updates.Auto.Title}" Description="{DynamicResource Str.Updates.Auto.Desc}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox Style="{StaticResource Input.Number}" Text="{Binding UpdateCheckMinutes}" IsEnabled="{Binding AutoCheckUpdates}" />
+                        <TextBlock Text="{DynamicResource Str.Common.Unit.Minutes}" Style="{StaticResource Text.Caption}" Margin="8,0,16,0" VerticalAlignment="Center" />
+                        <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AutoCheckUpdates}" />
+                    </StackPanel>
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Updates.Startup.Title}" Description="{DynamicResource Str.Updates.Startup.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding CheckUpdatesOnStartup}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Updates.Pre.Title}" Description="{DynamicResource Str.Updates.Pre.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding IncludePrereleases}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Updates.Skipped.Title}" Description="{Binding SkippedVersionText}">
+                    <Button Style="{StaticResource Btn.Secondary}" Content="{DynamicResource Str.Updates.Skipped.Clear}" Command="{Binding ClearSkippedVersionCommand}"
+                            Visibility="{Binding HasSkippedVersion, Converter={StaticResource BoolToVis}}" />
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+
+        <TextBlock Text="{DynamicResource Str.Updates.Safety}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.Updates.Verify.Title}" Description="{DynamicResource Str.Updates.Verify.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding VerifyUpdateDownload}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Updates.Keep.Title}" Description="{DynamicResource Str.Updates.Keep.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding KeepUpdateBackup}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Updates.Backup.Title}" Description="{Binding BackupStatus}">
+                    <StackPanel Orientation="Horizontal" Visibility="{Binding HasUpdateBackup, Converter={StaticResource BoolToVis}}">
+                        <Button Style="{StaticResource Btn.Ghost}" Content="{DynamicResource Str.Common.Delete}" Command="{Binding DiscardBackupCommand}" />
+                        <Button Style="{StaticResource Btn.Secondary}" Margin="8,0,0,0" Content="{DynamicResource Str.Updates.Rollback}" Command="{Binding RollbackCommand}" />
+                    </StackPanel>
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+    </StackPanel>
+</UserControl>

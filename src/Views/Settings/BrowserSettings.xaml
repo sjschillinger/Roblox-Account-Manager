@@ -1,0 +1,47 @@
+<UserControl x:Class="RobloxAccountManager.Views.Settings.BrowserSettings"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:RobloxAccountManager.Controls">
+    <StackPanel>
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Browser}" FontFamily="{StaticResource DisplayFont}" FontSize="18" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}" />
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Browser.Desc}" Style="{StaticResource Text.Caption}" FontSize="13" Margin="0,4,0,22" />
+
+        <TextBlock Text="{DynamicResource Str.Browser.Section}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.Browser.Engine.Title}" Description="{DynamicResource Str.Browser.Engine.Desc}">
+                    <ComboBox Width="220" ItemsSource="{Binding BrowserEngines}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding BrowserEngine}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Browser.Current}" Description="{Binding BrowserStatus}" />
+            </ctl:DividerStack>
+        </Border>
+
+        <TextBlock Text="CloakBrowser" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,12">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{Binding ChromiumStatus}" Description="{DynamicResource Str.Browser.Cloak.Desc}">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource Btn.Danger}" Content="{DynamicResource Str.Common.Remove}" Command="{Binding RemoveChromiumCommand}"
+                                Visibility="{Binding ChromiumInstalled, Converter={StaticResource BoolToVis}}" />
+                        <Button Margin="8,0,0,0" ctl:Ui.Icon="{StaticResource Icon.Download}"
+                                Command="{Binding DownloadChromiumCommand}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource Btn.Secondary}">
+                                    <Setter Property="Content" Value="{DynamicResource Str.Browser.Cloak.Download}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ChromiumInstalled}" Value="True">
+                                            <Setter Property="Content" Value="{DynamicResource Str.Browser.Cloak.Reinstall}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+        <TextBlock Text="{DynamicResource Str.Browser.Note}" Style="{StaticResource Text.Caption}" Margin="2,0,0,0" />
+    </StackPanel>
+</UserControl>

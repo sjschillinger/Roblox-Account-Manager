@@ -44,6 +44,10 @@ public static class AuditLogService
             lock (Gate)
             {
                 Directory.CreateDirectory(Paths.DataDir);
+                // Rotate past 2 MB so a long-running install cannot grow the log without bound.
+                var fi = new FileInfo(LogPath);
+                if (fi.Exists && fi.Length > 2 * 1024 * 1024)
+                    File.Move(LogPath, LogPath + ".1", overwrite: true);
                 File.AppendAllText(LogPath, line + System.Environment.NewLine, Encoding.UTF8);
             }
         }

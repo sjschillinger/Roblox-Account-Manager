@@ -45,12 +45,36 @@ public static class ProcessRegistry
 
         /// <summary>How long this client has been running.</summary>
         public TimeSpan Uptime => DateTime.UtcNow - LaunchedUtc;
+
+        /// <summary>
+        /// Set when the manager (or the user through it) is closing this client on purpose. The exit
+        /// is still reported — playtime is booked — but the crash watchdog leaves it alone instead of
+        /// answering a deliberate close with an auto-rejoin.
+        /// </summary>
+        public volatile bool ClosingIntentionally;
     }
 
     private static readonly ConcurrentDictionary<int, Tracked> _byPid = new();
 
     /// <summary>Raised (off the UI thread) when a tracked client exits/crashes.</summary>
     public static event Action<Tracked>? Exited;
+
+    /// <summary>Raised (off the UI thread) whenever a client was registered or dropped.</summary>
+    public static event Action? Changed;
+
+    private static void RaiseChanged()
+    {
+        try { Changed?.Invoke(); } catch { }
+    }
+
+    /// <summary>Flags a tracked client as being closed on purpose (see <see cref="Tracked.ClosingIntentionally"/>).</summary>
+    public static void MarkClosing(int pid)
+    {
+        if (_byPid.TryGetValue(pid, out var t)) t.ClosingIntentionally = true;
+    }
+
+    /// <summary>Pids tracked for an account right now.</summary>
+    public static int CountFor(long userId) => _byPid.Values.Count(t => t.UserId == userId && !t.IsExternal);
 
     public static IReadOnlyCollection<Tracked> All
     {
@@ -104,6 +128,7 @@ public static class ProcessRegistry
                 ProcessName = ClientProcess,
                 StartTimeLocal = candidate.start,
             };
+            RaiseChanged();
             return candidate.proc.Id;
         }
         catch { return 0; }
@@ -165,12 +190,14 @@ public static class ProcessRegistry
         }
         catch { }
         finally { foreach (var p in procs) { try { p.Dispose(); } catch { } } }
+        if (adopted > 0) RaiseChanged();
         return adopted;
     }
 
     /// <summary>Drops entries whose process has exited, firing <see cref="Exited"/> for each.</summary>
     public static void Prune()
     {
+        bool removed = false;
         foreach (var kv in _byPid.ToArray())
         {
             bool gone;
@@ -183,9 +210,11 @@ public static class ProcessRegistry
 
             if (gone && _byPid.TryRemove(kv.Key, out var t))
             {
+                removed = true;
                 try { Exited?.Invoke(t); } catch { }
             }
         }
+        if (removed) RaiseChanged();
     }
 
     /// <summary>
@@ -229,5 +258,9 @@ public static class ProcessRegistry
         catch { return -1; }
     }
 
-    public static void Forget(int pid) => _byPid.TryRemove(pid, out _);
+    /// <summary>Drops a pid without raising <see cref="Exited"/> (the pid turned out not to be a client).</summary>
+    public static void Forget(int pid)
+    {
+        if (_byPid.TryRemove(pid, out _)) RaiseChanged();
+    }
 }

@@ -1,0 +1,101 @@
+<UserControl x:Class="RobloxAccountManager.Views.Settings.SecuritySettings"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:RobloxAccountManager.Controls">
+    <StackPanel>
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Security}" FontFamily="{StaticResource DisplayFont}" FontSize="18" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}" />
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Security.Desc}" Style="{StaticResource Text.Caption}" FontSize="13" Margin="0,4,0,22" />
+
+        <TextBlock Text="{DynamicResource Str.Security.Password.Section}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{Binding PasswordStatus}" Description="{DynamicResource Str.Security.Password.Desc}">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource Btn.Danger}" Content="{DynamicResource Str.Common.Remove}" Margin="0,0,8,0"
+                                Command="{Binding RemovePasswordCommand}" Visibility="{Binding HasMasterPassword, Converter={StaticResource BoolToVis}}" />
+                        <Button ctl:Ui.Icon="{StaticResource Icon.Key}" Command="{Binding SetPasswordCommand}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource Btn.Primary}">
+                                    <Setter Property="Content" Value="{DynamicResource Str.Security.Password.Set}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasMasterPassword}" Value="True">
+                                            <Setter Property="Content" Value="{DynamicResource Str.Security.Password.Change}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Security.AutoLock.Title}" Description="{DynamicResource Str.Security.AutoLock.Desc}"
+                                 IsEnabled="{Binding HasMasterPassword}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox Style="{StaticResource Input.Number}" Text="{Binding AutoLockMinutes}" IsEnabled="{Binding AutoLockEnabled}" />
+                        <TextBlock Text="{DynamicResource Str.Common.Unit.Minutes}" Style="{StaticResource Text.Caption}" Margin="8,0,16,0" VerticalAlignment="Center" />
+                        <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AutoLockEnabled}" />
+                    </StackPanel>
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Security.LockOnMinimize.Title}" Description="{DynamicResource Str.Security.LockOnMinimize.Desc}"
+                                 IsEnabled="{Binding HasMasterPassword}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding LockOnMinimize}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Security.LockNow.Title}" Description="{DynamicResource Str.Security.LockNow.Desc}"
+                                 IsEnabled="{Binding HasMasterPassword}">
+                    <Button Style="{StaticResource Btn.Secondary}" ctl:Ui.Icon="{StaticResource Icon.Lock}" Content="{DynamicResource Str.Security.LockNow}"
+                            Command="{Binding LockNowCommand}" />
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+
+        <TextBlock Text="{DynamicResource Str.Security.Privacy.Section}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.Security.Clipboard.Title}" Description="{DynamicResource Str.Security.Clipboard.Desc}">
+                    <ComboBox Width="160" ItemsSource="{Binding ClipboardOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding ClipboardClearSeconds}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Security.HideNames.Title}" Description="{DynamicResource Str.Security.HideNames.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding HideUsernames}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Security.Audit.Title}" Description="{DynamicResource Str.Security.Audit.Desc}">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource Btn.Ghost}" Content="{DynamicResource Str.Common.OpenFolder}" Margin="0,0,12,0" Command="{Binding OpenAuditLogCommand}" />
+                        <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AuditLogEnabled}" />
+                    </StackPanel>
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+
+        <TextBlock Text="{DynamicResource Str.Security.Sessions.Section}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.Security.Validate.Title}" Description="{DynamicResource Str.Security.Validate.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding ValidateCookiesOnStartup}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Security.Rotation.Title}" Description="{DynamicResource Str.Security.Rotation.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding RotationDetectionEnabled}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Security.CheckNow.Title}" Description="{DynamicResource Str.Security.CheckNow.Desc}">
+                    <Button Style="{StaticResource Btn.Secondary}" ctl:Ui.Icon="{StaticResource Icon.ShieldCheck}" Content="{DynamicResource Str.Security.CheckNow}"
+                            Command="{Binding ValidateCookiesNowCommand}" />
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+
+        <TextBlock Text="{DynamicResource Str.Backup.Section}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.Backup.Title}" Description="{DynamicResource Str.Backup.Desc}">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource Btn.Secondary}" ctl:Ui.Icon="{StaticResource Icon.Import}" Content="{DynamicResource Str.Backup.Restore}"
+                                Command="{Binding ImportBackupCommand}" />
+                        <Button Style="{StaticResource Btn.Secondary}" Margin="8,0,0,0" ctl:Ui.Icon="{StaticResource Icon.Export}" Content="{DynamicResource Str.Backup.Export}"
+                                Command="{Binding ExportBackupCommand}" />
+                    </StackPanel>
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+        <TextBlock Text="{DynamicResource Str.Security.StorageNote}" Style="{StaticResource Text.Caption}" Margin="2,12,0,0" />
+    </StackPanel>
+</UserControl>

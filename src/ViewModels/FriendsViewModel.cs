@@ -1,8 +1,4 @@
-using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Linq;
-using System.Threading.Tasks;
 using System.Windows;
 using RobloxAccountManager.Models;
 using RobloxAccountManager.Mvvm;
@@ -11,15 +7,13 @@ using RobloxAccountManager.Services;
 namespace RobloxAccountManager.ViewModels;
 
 /// <summary>
-/// Backs the "Friends" tab: pick a manager account, load its Roblox friends list,
-/// see who is online / in-game, and join (follow) a friend with one click.
+/// Backs the Friends page: pick one of your accounts, see its Roblox friends with who is online and
+/// in which game, and follow one into their server with any of your accounts.
 /// </summary>
 public class FriendsViewModel : ObservableObject
 {
     private readonly AccountStore _store;
     private readonly MainViewModel _main;
-
-    // Full unfiltered list; Friends is the search-filtered view bound by the UI.
     private readonly List<Friend> _all = new();
 
     public FriendsViewModel(AccountStore store, MainViewModel main)
@@ -27,36 +21,28 @@ public class FriendsViewModel : ObservableObject
         _store = store;
         _main = main;
 
-        RefreshCommand     = new AsyncRelayCommand(_ => RefreshAsync());
-        JoinCommand        = new AsyncRelayCommand(p => JoinAsync(p as Friend));
-        OpenProfileCommand = new RelayCommand(p => OpenProfile(p as Friend));
+        RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync());
+        JoinCommand = new AsyncRelayCommand(p => JoinAsync(p as Friend));
+        OpenProfileCommand = new RelayCommand(p => { if (p is Friend f) BrowserService.OpenProfile(f.UserId); });
+        CopyUsernameCommand = new RelayCommand(p =>
+        {
+            if (p is Friend f && f.Username.Length > 0)
+                _main.SetStatus(ClipboardService.CopyText(f.Username) ? L.T("Status.Copied") : L.T("Status.ClipboardBusy"));
+        });
 
-        // Make the tab useful immediately by defaulting to the first account.
-        //
-        // This view-model is constructed while the store is still empty — the accounts are
-        // decrypted and added a moment later, during startup — so seeding once here always
-        // picked null and left the tab permanently blank until the user chose an account by
-        // hand. Keep watching the collection until the first account actually shows up.
+        // The store is filled a moment after this view-model is built, so pick the first account once
+        // it actually arrives instead of leaving the page permanently empty.
         _selectedAccount = _store.Accounts.FirstOrDefault();
-        if (_selectedAccount == null)
-            _store.Accounts.CollectionChanged += OnStoreAccountsChanged;
+        _store.Accounts.CollectionChanged += (_, _) =>
+        {
+            if (_selectedAccount == null || !_store.Accounts.Contains(_selectedAccount))
+                SelectedAccount = _store.Accounts.FirstOrDefault(a => a.IsValid) ?? _store.Accounts.FirstOrDefault();
+        };
     }
 
-    private void OnStoreAccountsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
-    {
-        var first = _store.Accounts.FirstOrDefault();
-        if (first == null) return;
-        _store.Accounts.CollectionChanged -= OnStoreAccountsChanged;
-        SelectedAccount = first;
-    }
-
-    /// <summary>Accounts available in the manager (drives the picker).</summary>
     public ObservableCollection<Account> Accounts => _store.Accounts;
-
-    /// <summary>Search-filtered friends currently shown.</summary>
     public ObservableCollection<Friend> Friends { get; } = new();
 
-    /// <summary>Mirrors Settings.HideUsernames so picker + friend names can mask (RefreshMask cross-VM pattern).</summary>
     public bool MaskUsernames => SettingsService.Current.HideUsernames;
     public void RefreshMask() => OnPropertyChanged(nameof(MaskUsernames));
 
@@ -67,170 +53,167 @@ public class FriendsViewModel : ObservableObject
         set
         {
             if (!SetField(ref _selectedAccount, value)) return;
-            // Switching accounts must drop the previous account's friends; otherwise
-            // EnsureLoaded's "Friends.Count > 0" guard keeps showing the old account's list.
+            // Switching accounts drops the previous list, or the "already loaded" check would keep it.
             _all.Clear();
             Friends.Clear();
-            EmptyText = "Pick an account and hit Refresh to load its friends.";
+            _loadedFor = null;
+            RaiseList();
+            if (_isShown) _ = RefreshAsync();
         }
     }
 
     private string _searchText = "";
-    public string SearchText
-    {
-        get => _searchText;
-        set { if (SetField(ref _searchText, value)) ApplyFilter(); }
-    }
+    public string SearchText { get => _searchText; set { if (SetField(ref _searchText, value ?? "")) ApplyFilter(); } }
+
+    private string _filter = "All";
+    /// <summary>All | Online | InGame</summary>
+    public string Filter { get => _filter; set { if (SetField(ref _filter, value ?? "All")) ApplyFilter(); } }
 
     private bool _busy;
-    public bool Busy { get => _busy; private set => SetField(ref _busy, value); }
+    public bool Busy { get => _busy; private set { if (SetField(ref _busy, value)) RaiseList(); } }
 
-    private string _emptyText = "Pick an account and hit Refresh to load its friends.";
-    public string EmptyText { get => _emptyText; private set => SetField(ref _emptyText, value); }
+    private string? _error;
+    public string? Error { get => _error; private set { if (SetField(ref _error, value)) RaiseList(); } }
+
+    public int CountAll => _all.Count;
+    public int CountOnline => _all.Count(f => f.IsOnline);
+    public int CountInGame => _all.Count(f => f.IsInGame);
+
+    public bool IsEmpty => !_busy && Friends.Count == 0;
+    public bool ShowLoading => _busy && Friends.Count == 0;
+
+    public string EmptyText =>
+        _error ?? (_selectedAccount == null ? L.T("Friends.Empty.NoAccount")
+                 : _loadedFor == null ? L.T("Friends.Empty.NotLoaded")
+                 : _all.Count == 0 ? L.T("Friends.Empty.None")
+                 : L.T("Friends.Empty.NoMatch"));
+
+    public string Subtitle => _all.Count == 0 ? L.T("Friends.Subtitle") : L.N("Friends.Count", _all.Count, CountOnline);
 
     public AsyncRelayCommand RefreshCommand { get; }
     public AsyncRelayCommand JoinCommand { get; }
     public RelayCommand OpenProfileCommand { get; }
+    public RelayCommand CopyUsernameCommand { get; }
 
-    /// <summary>Called when the Friends tab becomes visible — auto-loads the list once.</summary>
+    private Account? _loadedFor;
+    private bool _isShown;
+
     public void EnsureLoaded()
     {
-        if (Busy || Friends.Count > 0) return;
-        if (SelectedAccount == null) return;
+        _isShown = true;
+        if (AppInfo.IsDemo || Busy || SelectedAccount == null || ReferenceEquals(_loadedFor, SelectedAccount)) return;
         _ = RefreshAsync();
     }
 
-    // ------------------------------------------------------------------
-    //  Load
-    // ------------------------------------------------------------------
+    public void RefreshLocalized()
+    {
+        foreach (var f in _all) f.RaiseLocalized();
+        OnPropertyChanged(string.Empty);
+    }
+
+    private void RaiseList()
+    {
+        OnPropertyChanged(nameof(IsEmpty));
+        OnPropertyChanged(nameof(ShowLoading));
+        OnPropertyChanged(nameof(EmptyText));
+        OnPropertyChanged(nameof(Subtitle));
+        OnPropertyChanged(nameof(CountAll));
+        OnPropertyChanged(nameof(CountOnline));
+        OnPropertyChanged(nameof(CountInGame));
+    }
+
     private async Task RefreshAsync()
     {
         var acc = SelectedAccount;
-        if (acc == null) { _main.SetStatus("Select an account first."); return; }
-        if (string.IsNullOrEmpty(acc.Cookie) || acc.UserId <= 0)
+        if (acc == null) return;
+        if (string.IsNullOrEmpty(acc.Cookie) || acc.UserId <= 0 || !acc.IsValid)
         {
-            _main.SetStatus($"{acc.DisplayNameOrUser} has no valid session — re-login it first.");
+            Error = L.T("Friends.NoSession", acc.DisplayNameOrUser);
             return;
         }
 
+        Error = null;
         Busy = true;
-        _main.SetStatus($"Loading friends of {acc.DisplayNameOrUser}…");
+        _main.SetStatus(L.T("Friends.Loading", acc.DisplayNameOrUser));
         try
         {
             var friends = await RobloxApi.GetFriendsAsync(acc.Cookie, acc.UserId);
+            if (!ReferenceEquals(acc, SelectedAccount)) return;   // the user switched accounts meanwhile
 
             _all.Clear();
-            _all.AddRange(friends.OrderBy(f => f.DisplayNameOrUser, StringComparer.OrdinalIgnoreCase));
+            _all.AddRange(friends.OrderBy(f => f.DisplayNameOrUser, StringComparer.CurrentCultureIgnoreCase));
+            _loadedFor = acc;
             ApplyFilter();
 
-            if (_all.Count == 0)
+            if (_all.Count > 0)
             {
-                EmptyText = "No friends found for this account.";
-                _main.SetStatus($"{acc.DisplayNameOrUser} has no friends listed.");
-                return;
-            }
+                var ids = _all.Select(f => f.UserId).ToList();
+                var presence = await RobloxApi.GetPresenceDetailsAsync(acc.Cookie, ids);
+                var heads = await RobloxApi.GetHeadshotsAsync(ids);
+                if (!ReferenceEquals(acc, SelectedAccount)) return;
 
-            // Presence (join targets) + headshots — fill the loaded rows in place.
-            var ids = _all.Select(f => f.UserId).ToList();
-            var presence = await RobloxApi.GetPresenceDetailsAsync(acc.Cookie, ids);
-            var heads    = await RobloxApi.GetHeadshotsAsync(ids);
-
-            void Apply()
-            {
                 foreach (var f in _all)
                 {
                     if (presence.TryGetValue(f.UserId, out var pd))
                     {
-                        f.Presence     = pd.Status;
+                        f.Presence = pd.Status;
                         f.LastLocation = pd.LastLocation;
-                        f.PlaceId      = pd.PlaceId;
-                        f.RootPlaceId  = pd.RootPlaceId;
-                        f.JobId        = pd.JobId;
+                        f.PlaceId = pd.PlaceId;
+                        f.RootPlaceId = pd.RootPlaceId;
+                        f.JobId = pd.JobId;
                     }
                     if (heads.TryGetValue(f.UserId, out var url)) f.HeadshotUrl = url;
                 }
-                ReorderByPresence();   // in-game / online friends float to the top
+                _all.Sort((a, b) =>
+                {
+                    int r = PresenceStatus.Rank(a.Presence).CompareTo(PresenceStatus.Rank(b.Presence));
+                    return r != 0 ? r : string.Compare(a.DisplayNameOrUser, b.DisplayNameOrUser, StringComparison.CurrentCultureIgnoreCase);
+                });
+                ApplyFilter();
             }
 
-            var d = Application.Current?.Dispatcher;
-            if (d != null && !d.CheckAccess()) d.Invoke(Apply); else Apply();
-
-            int online = _all.Count(f => f.Presence != "Offline");
-            _main.SetStatus($"{_all.Count} friends · {online} online.");
+            _main.SetStatus(L.N("Friends.Count", _all.Count, CountOnline));
         }
         catch (Exception ex)
         {
-            _main.SetStatus($"Couldn't load friends: {ex.Message}");
+            Error = L.T("Friends.LoadFailed", ex.Message);
+            _main.SetStatus(Error);
         }
         finally { Busy = false; }
     }
 
-    private static int PresenceRank(string p) => p switch
-    {
-        "In Game"   => 0,
-        "In Studio" => 1,
-        "Online"    => 2,
-        _           => 3
-    };
-
-    private void ReorderByPresence()
-    {
-        _all.Sort((a, b) =>
-        {
-            int r = PresenceRank(a.Presence).CompareTo(PresenceRank(b.Presence));
-            return r != 0
-                ? r
-                : string.Compare(a.DisplayNameOrUser, b.DisplayNameOrUser, StringComparison.OrdinalIgnoreCase);
-        });
-        ApplyFilter();
-    }
-
     private void ApplyFilter()
     {
-        var q = (_searchText ?? "").Trim();
+        var q = _searchText.Trim();
         Friends.Clear();
         foreach (var f in _all)
         {
-            if (q.Length == 0
-                || f.Username.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || f.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase))
-                Friends.Add(f);
+            if (_filter == "Online" && !f.IsOnline) continue;
+            if (_filter == "InGame" && !f.IsInGame) continue;
+            if (q.Length > 0
+                && !f.Username.Contains(q, StringComparison.CurrentCultureIgnoreCase)
+                && !f.DisplayName.Contains(q, StringComparison.CurrentCultureIgnoreCase))
+                continue;
+            Friends.Add(f);
         }
+        RaiseList();
     }
 
-    // ------------------------------------------------------------------
-    //  Join (follow) + profile
-    // ------------------------------------------------------------------
     private async Task JoinAsync(Friend? friend)
     {
         if (friend == null) return;
         var acc = SelectedAccount;
-        if (acc == null) { _main.SetStatus("Select an account first."); return; }
+        if (acc == null) return;
         if (!friend.CanJoin)
         {
-            _main.SetStatus($"{friend.DisplayNameOrUser} isn't in a joinable game right now.");
+            _main.SetStatus(L.T("Friends.NotJoinable", friend.DisplayNameOrUser));
             return;
         }
 
         long place = friend.RootPlaceId > 0 ? friend.RootPlaceId : friend.PlaceId;
-        _main.SetStatus($"Joining {friend.DisplayNameOrUser}…");
+        _main.SetStatus(L.T("Friends.Joining", friend.DisplayNameOrUser));
         var r = await LauncherService.LaunchAsync(acc, place, jobId: friend.JobId, followUserId: friend.UserId);
-        _main.SetStatus(r.Success
-            ? $"Launched {acc.DisplayNameOrUser} → following {friend.DisplayNameOrUser}."
-            : r.Message);
-    }
-
-    private void OpenProfile(Friend? friend)
-    {
-        if (friend == null) return;
-        try
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = $"https://www.roblox.com/users/{friend.UserId}/profile",
-                UseShellExecute = true
-            });
-        }
-        catch (Exception ex) { _main.SetStatus($"Couldn't open profile: {ex.Message}"); }
+        _main.SetStatus(r.Success ? L.T("Friends.Joined", acc.DisplayNameOrUser, friend.DisplayNameOrUser) : r.Message);
+        if (!r.Success) ToastService.Error(L.T("Launch.FailedTitle"), r.Message);
     }
 }

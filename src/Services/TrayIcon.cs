@@ -31,6 +31,8 @@ public sealed class TrayIcon : IDisposable
 
     private const int CMD_OPEN = 1;
     private const int CMD_EXIT = 2;
+    private const int CMD_LOCK = 3;
+    private const int CMD_CLOSE_CLIENTS = 4;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct NOTIFYICONDATA
@@ -79,17 +81,21 @@ public sealed class TrayIcon : IDisposable
     private readonly HwndSource _source;
     private readonly Action _onOpen;
     private readonly Action _onExit;
+    private readonly Action? _onLock;
+    private readonly Action? _onCloseClients;
     private readonly string _tip;
     private IntPtr _hIcon;
     private IntPtr _hMenu;
     private bool _visible;
     private bool _disposed;
 
-    public TrayIcon(string tooltip, Action onOpen, Action onExit)
+    public TrayIcon(string tooltip, Action onOpen, Action onExit, Action? onLock = null, Action? onCloseClients = null)
     {
         _tip = tooltip;
         _onOpen = onOpen;
         _onExit = onExit;
+        _onLock = onLock;
+        _onCloseClients = onCloseClients;
 
         // Message-only window (parent HWND_MESSAGE): invisible, no taskbar entry, pumped by the Dispatcher.
         var p = new HwndSourceParameters("RAM.TrayWindow")
@@ -111,11 +117,6 @@ public sealed class TrayIcon : IDisposable
             _hIcon = small[0];
         }
         catch { _hIcon = IntPtr.Zero; }
-
-        _hMenu = CreatePopupMenu();
-        AppendMenu(_hMenu, MF_STRING, (IntPtr)CMD_OPEN, "Open");
-        AppendMenu(_hMenu, MF_SEPARATOR, IntPtr.Zero, null);
-        AppendMenu(_hMenu, MF_STRING, (IntPtr)CMD_EXIT, "Exit");
 
         Visible = true;
     }
@@ -175,14 +176,31 @@ public sealed class TrayIcon : IDisposable
 
     private void ShowMenu()
     {
+        // Built per open, so the labels follow the current language and "Lock" only shows when a
+        // master password makes locking possible.
+        if (_hMenu != IntPtr.Zero) DestroyMenu(_hMenu);
+        _hMenu = CreatePopupMenu();
+        AppendMenu(_hMenu, MF_STRING, (IntPtr)CMD_OPEN, L.T("Tray.Open"));
+        if (_onCloseClients != null)
+            AppendMenu(_hMenu, MF_STRING, (IntPtr)CMD_CLOSE_CLIENTS, L.T("Tray.CloseClients"));
+        if (_onLock != null && LockService.CanLock && !LockService.IsLocked)
+            AppendMenu(_hMenu, MF_STRING, (IntPtr)CMD_LOCK, L.T("Tray.Lock"));
+        AppendMenu(_hMenu, MF_SEPARATOR, IntPtr.Zero, null);
+        AppendMenu(_hMenu, MF_STRING, (IntPtr)CMD_EXIT, L.T("Tray.Exit"));
+
         // Foreground + WM_NULL bounce is the documented dance so the menu closes on outside clicks.
         SetForegroundWindow(_source.Handle);
         GetCursorPos(out var pt);
         int cmd = TrackPopupMenuEx(_hMenu, TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.X, pt.Y, _source.Handle, IntPtr.Zero);
         PostMessage(_source.Handle, 0, IntPtr.Zero, IntPtr.Zero);   // WM_NULL
 
-        if (cmd == CMD_OPEN) _onOpen();
-        else if (cmd == CMD_EXIT) _onExit();
+        switch (cmd)
+        {
+            case CMD_OPEN: _onOpen(); break;
+            case CMD_EXIT: _onExit(); break;
+            case CMD_LOCK: _onLock?.Invoke(); break;
+            case CMD_CLOSE_CLIENTS: _onCloseClients?.Invoke(); break;
+        }
     }
 
     public void Dispose()

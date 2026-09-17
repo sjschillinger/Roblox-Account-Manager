@@ -17,6 +17,12 @@ data/
 **/data/
 error.log
 *.log
+# Stray copies of the data files outside a data/ folder (account store, backups, exports).
+*.dat
+*.bak
+*.rambk
+accounts-*.csv
+accounts-*.json
 
 # ---------------------------------------------------------------------------
 #  Secrets — a stray token/credential file must never reach the repo
@@ -44,9 +50,9 @@ release.bat
 release.ps1
 
 # ---------------------------------------------------------------------------
-#  Icon-Quelle — die lose 256x256 icon.png wird beim Build in src/AppIcon.cs
-#  (base64) und src/Assets/app.ico eingebacken; die rohe PNG gehoert nicht ins
-#  Repo. app.ico wird bewusst getrackt (ApplicationIcon im csproj).
+#  Icon-Quelle — die lose 256x256 icon.png steckt bereits in src/Assets/app.ico;
+#  die rohe PNG gehoert nicht ins Repo. app.ico wird bewusst getrackt
+#  (ApplicationIcon im csproj). README-Bilder liegen in .github/assets/.
 # ---------------------------------------------------------------------------
 icon.png
 

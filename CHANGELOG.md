@@ -10,6 +10,102 @@ into the exe and shown in **What's new**, so a release no longer needs its own n
 3. Push the tag `vX.Y.Z`. The release workflow builds the exe, publishes its SHA-256 and uses the
    section you just wrote as the release body — the same section the app embeds and shows in
    **What's new**.
+4. Run `python tools/check-localization.py` first — the workflow runs it too and stops on a missing
+   or broken translation.
+
+---
+
+## v2.0.0 — 2026-09-17
+
+Rebuilt from the ground up: a new interface, eight languages, and every feature that was still open
+on the roadmap.
+
+### A new interface
+
+- **New layout.** A sidebar with your groups, an **Overview** page, and an **Accounts** page with a
+  detail panel next to the list. Everything about an account (launching, notes, session, 2FA, proxy,
+  FastFlags) is in that panel, in tabs.
+- **Light, dark or system theme** with six accent colors. The color editor is still there for
+  fine-tuning.
+- **Command palette.** Press **Ctrl+K** to jump to any account, page or setting, or run an action.
+- **Settings in categories** with a search box, instead of one long page.
+- **Eight languages:** English, Deutsch, Español, Français, Português (Brasil), Polski, Türkçe and
+  Русский. The app starts in your Windows language; change it under **Settings → General**.
+- **Better filtering and sorting.** Filter by online, in game, offline, needs attention or pinned;
+  sort by name, status, last used, Robux or playtime; switch between a comfortable and a compact list.
+- Keyboard shortcuts throughout: **Ctrl+N** add account, **Ctrl+F** search, **Enter** launch,
+  **Space** tick, **F5** refresh, **Ctrl+1–5** switch pages.
+
+### Roadmap features
+
+- **Account health.** The Overview lists sessions that have expired, haven't been checked for two
+  weeks or are over a year old, with a one-click check or sign-in. Every account shows its session
+  age and when it was last checked.
+- **Presets and schedules editor.** The new **Automation** page builds launch presets (accounts,
+  place, delay) and schedules (time, days, launch or close, close again after a while) without
+  touching a file.
+- **Per-account proxy** is now actually used: Roblox web requests and browser windows for that
+  account go through it. Each account has its own **Test** button.
+- **Light mode**, as a proper theme rather than an edited dark one.
+
+### Signing in
+
+- **Browser sign-in is the default.** Roblox's own login page opens in a clean, temporary profile of
+  Edge or Chrome. Captchas, 2-step verification and passkeys work as usual, the password never
+  passes through the app, and the profile is deleted right after.
+- The **private browser download is optional** now. It is only needed on PCs without Edge or Chrome,
+  and every download is checked against the SHA-256 published with it.
+- Signing in with username and password and pasting a cookie are still available as tabs.
+
+### Security
+
+- **Lock the manager** with your master password: with **Ctrl+L**, after a period without input, or
+  when the window is minimized. Wrong passwords slow down further attempts.
+- **Copied secrets clear themselves.** Cookies, API tokens and 2FA codes leave the clipboard after
+  30 seconds (adjustable) and are kept out of Windows clipboard history and cloud sync.
+- The **proxy password, web API token and Discord webhook** are now stored encrypted.
+- **Local web API hardening.** Requests from web pages and from foreign host names are refused,
+  `/launch` and `/close` require POST, `/cookie` is off until you allow it, and repeated wrong tokens
+  are throttled.
+- **Plugins are off by default.** If you already have plugin DLLs installed they stay enabled after
+  the update.
+- Discord webhooks only accept `discord.com` links, CSV exports can no longer carry spreadsheet
+  formulas, and the channel between two running copies of the app only accepts your own Windows user.
+- The updater only installs files from GitHub, and a download that fails verification is deleted
+  instead of being retried as the same broken file.
+
+### Keeping up with Roblox
+
+- **FastFlags follow Roblox's allowlist.** Since September 2025 Roblox ignores flags that aren't on
+  it. Options that stopped working were replaced with ones that still do, and flags Roblox ignores
+  are listed instead of silently doing nothing.
+- **The FPS cap is written to Roblox's own settings file**, the same value as the in-game frame
+  rate option. The old FastFlag unlock no longer works.
+- **Friends load through Roblox's current endpoint**, which also fixes missing names.
+- A failed status request no longer shows every account as offline for a moment.
+
+### Fixes
+
+- An account's color tag is saved again.
+- Closing a client on purpose no longer triggers auto-rejoin.
+- Scheduled tasks that launch a preset work again.
+- An account whose saved cookie can't be decrypted keeps its encrypted value instead of being
+  overwritten with an empty one.
+- Cancelling the private browser download no longer crashes the app.
+- Hotkeys are blocked while the manager is locked, and **Close all Roblox clients** uses the same
+  safe path as the button.
+
+### Good to know before updating
+
+- **Your settings are migrated automatically.** The old file is kept as `settings.json.v0.bak` in the
+  data folder.
+- The old theme presets become accent colors. Custom colors from 1.x are reset, because the color
+  names changed.
+- If you used the FPS unlock, its value becomes the new FPS cap.
+- Rolling back to 1.7 works (**Settings → Updates → Roll back**), but 1.7 can't read the encrypted
+  proxy password, API token and webhook. Enter them again there.
+- Scripts using the web API: send `POST` for `/launch` and `/close`, and turn on **Allow reading
+  cookies** if a tool needs `/cookie`.
 
 ---
 

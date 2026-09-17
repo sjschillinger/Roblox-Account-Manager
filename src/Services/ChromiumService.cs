@@ -1,22 +1,24 @@
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text.Json;
-using System.Threading;
 
 namespace RobloxAccountManager.Services;
 
 /// <summary>
-/// Manages a private, portable CloakBrowser build (stealth Chromium — github.com/CloakHQ/CloakBrowser)
-/// kept under data/cloakbrowser. Used for "Open in browser" so accounts open in a clean instance —
-/// never the user's Edge/Chrome and never their main profile. Downloaded on demand from the newest
-/// free GitHub release that ships a windows-x64 zip (the "-pro" tags only carry checksums; their
-/// binaries are license-gated). A previously downloaded plain Chromium under data/chromium keeps
-/// working as a fallback, since CloakBrowser is a drop-in Chromium binary with identical CLI flags.
+/// Manages an optional private, portable CloakBrowser build (a Chromium — github.com/CloakHQ/CloakBrowser)
+/// under data/cloakbrowser. Opening accounts works without it through Edge or Chrome; this download is
+/// for people who want a browser that is entirely separate from anything installed on the PC.
+///
+/// Downloaded from the newest GitHub release that ships a free windows-x64 zip, and verified against
+/// the SHA-256 digest GitHub publishes for that asset before anything is extracted.
 /// </summary>
 public static class ChromiumService
 {
-    private const string ReleasesUrl = "https://api.github.com/repos/CloakHQ/CloakBrowser/releases?per_page=30";
+    // 100 per page: the project publishes many binary-less "-pro" tags, and a short page can push the
+    // last free Windows build off the first page entirely.
+    private const string ReleasesUrl = "https://api.github.com/repos/CloakHQ/CloakBrowser/releases?per_page=100";
     private const string AssetName = "cloakbrowser-windows-x64.zip";
 
     private static string CloakDir => Paths.InData("cloakbrowser");
@@ -24,7 +26,7 @@ public static class ChromiumService
 
     private static string? _cachedExe;
 
-    /// <summary>Browser exe to launch — CloakBrowser preferred, legacy Chromium fallback, "" if none.</summary>
+    /// <summary>Browser exe — CloakBrowser preferred, a legacy Chromium download as fallback, "" if none.</summary>
     public static string ChromePath => FindExe() ?? "";
 
     public static bool IsInstalled => FindExe() != null;
@@ -37,9 +39,7 @@ public static class ChromiumService
         try
         {
             if (Directory.Exists(CloakDir))
-                _cachedExe = Directory
-                    .EnumerateFiles(CloakDir, "chrome.exe", SearchOption.AllDirectories)
-                    .FirstOrDefault();
+                _cachedExe = Directory.EnumerateFiles(CloakDir, "chrome.exe", SearchOption.AllDirectories).FirstOrDefault();
         }
         catch { }
 
@@ -54,41 +54,40 @@ public static class ChromiumService
         public double Fraction => Total > 0 ? (double)Done / Total : 0;
     }
 
-    /// <summary>Downloads and extracts the newest free CloakBrowser build. Safe to cancel.</summary>
+    /// <summary>Downloads, verifies and extracts the newest free CloakBrowser build. Safe to cancel.</summary>
     public static async Task DownloadAsync(IProgress<Progress> progress, CancellationToken ct)
     {
         Directory.CreateDirectory(CloakDir);
 
-        // ~540 MB download — generous timeout so slow connections still make it.
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(60) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("RobloxAccountManager");
 
-        // Newest release that actually ships the free windows-x64 binary.
-        progress.Report(new Progress(0, 0, "Finding latest CloakBrowser…"));
+        progress.Report(new Progress(0, 0, L.T("Chromium.Phase.Finding")));
         string json = await http.GetStringAsync(ReleasesUrl, ct);
-        string? url = null, tag = null;
+        string? url = null, tag = null, digest = null;
         using (var doc = JsonDocument.Parse(json))
         {
             foreach (var rel in doc.RootElement.EnumerateArray())
             {
+                if (rel.TryGetProperty("draft", out var d) && d.ValueKind == JsonValueKind.True) continue;
                 if (!rel.TryGetProperty("assets", out var assets)) continue;
                 foreach (var asset in assets.EnumerateArray())
                 {
-                    if (asset.TryGetProperty("name", out var n) && n.GetString() == AssetName &&
-                        asset.TryGetProperty("browser_download_url", out var u))
-                    {
-                        url = u.GetString();
-                        tag = rel.TryGetProperty("tag_name", out var t) ? t.GetString() : null;
-                        break;
-                    }
+                    if (!asset.TryGetProperty("name", out var n) || n.GetString() != AssetName) continue;
+                    if (!asset.TryGetProperty("browser_download_url", out var u)) continue;
+                    url = u.GetString();
+                    tag = rel.TryGetProperty("tag_name", out var t) ? t.GetString() : null;
+                    digest = asset.TryGetProperty("digest", out var dg) && dg.ValueKind == JsonValueKind.String ? dg.GetString() : null;
+                    break;
                 }
                 if (url != null) break;
             }
         }
-        if (url == null)
-            throw new InvalidOperationException("No free CloakBrowser windows-x64 build found on GitHub.");
+        if (url == null || !IsGitHubUrl(url))
+            throw new InvalidOperationException(L.T("Chromium.Error.NoBuild"));
 
         string zipPath = Path.Combine(CloakDir, AssetName);
+        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         using (var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct))
         {
             resp.EnsureSuccessStatusCode();
@@ -99,27 +98,63 @@ public static class ChromiumService
             var buffer = new byte[81920];
             long done = 0;
             int read;
+            var lastReport = DateTime.MinValue;
+            string phase = L.T("Chromium.Phase.Downloading", tag ?? "");
             while ((read = await src.ReadAsync(buffer, ct)) > 0)
             {
                 await dst.WriteAsync(buffer.AsMemory(0, read), ct);
+                sha.AppendData(buffer, 0, read);
                 done += read;
-                progress.Report(new Progress(done, total, $"Downloading CloakBrowser {tag}…"));
+                if (DateTime.UtcNow - lastReport > TimeSpan.FromMilliseconds(100))
+                {
+                    lastReport = DateTime.UtcNow;
+                    progress.Report(new Progress(done, total, phase));
+                }
             }
         }
 
-        progress.Report(new Progress(0, 0, "Extracting…"));
-        // Wipe any previous build, keep the fresh zip until extraction succeeded.
-        foreach (var d in Directory.GetDirectories(CloakDir))
+        // GitHub computes this digest for every uploaded release asset; a mismatch means the file was
+        // corrupted or altered in transit, and it must not be extracted and executed.
+        progress.Report(new Progress(0, 0, L.T("Chromium.Phase.Verifying")));
+        if (digest != null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
         {
-            try { Directory.Delete(d, true); } catch { }
+            string actual = Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant();
+            if (!string.Equals(actual, digest[7..], StringComparison.OrdinalIgnoreCase))
+            {
+                try { File.Delete(zipPath); } catch { }
+                throw new InvalidOperationException(L.T("Chromium.Error.Checksum"));
+            }
         }
-        await Task.Run(() => ZipFile.ExtractToDirectory(zipPath, CloakDir), ct);
+
+        progress.Report(new Progress(0, 0, L.T("Chromium.Phase.Extracting")));
+        foreach (var dir in Directory.GetDirectories(CloakDir))
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+        // ExtractToDirectory rejects entries that would escape the target folder ("zip slip").
+        await Task.Run(() => ZipFile.ExtractToDirectory(zipPath, CloakDir, overwriteFiles: true), ct);
         try { File.Delete(zipPath); } catch { }
 
         _cachedExe = null;
         if (FindExe() == null || _cachedExe == LegacyChromePath)
-            throw new InvalidOperationException("Archive extracted but no chrome.exe found inside.");
+            throw new InvalidOperationException(L.T("Chromium.Error.NoExe"));
 
-        progress.Report(new Progress(1, 1, "Ready"));
+        progress.Report(new Progress(1, 1, L.T("Chromium.Phase.Ready")));
     }
+
+    /// <summary>Deletes the downloaded browser. Returns false when files were still in use.</summary>
+    public static bool Uninstall()
+    {
+        try
+        {
+            if (Directory.Exists(CloakDir)) Directory.Delete(CloakDir, true);
+            _cachedExe = null;
+            return true;
+        }
+        catch { _cachedExe = null; return false; }
+    }
+
+    private static bool IsGitHubUrl(string url)
+        => Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps
+           && (u.Host == "github.com" || u.Host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase));
 }

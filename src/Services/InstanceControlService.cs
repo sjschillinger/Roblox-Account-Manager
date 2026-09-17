@@ -159,16 +159,16 @@ public static class InstanceControlService
                 return false;
             }
 
+            // Deliberate: the watchdog must not treat this exit as a crash and relaunch it.
+            ProcessRegistry.MarkClosing(pid);
             p.CloseMainWindow();
             closed = p.WaitForExit(1500);
             if (!closed)
             {
                 try { p.Kill(); } catch { /* raced with its own exit */ }
 
-                // Only claim success once it is really gone. An elevated or protected client can
-                // survive Kill(), and Forget()ting one that is still running would strand it:
-                // Anti-AFK, the RAM monitor and the watchdog would all stop seeing it, and the
-                // panel would have no row left to close it from.
+                // Only claim success once it is really gone — an elevated or protected client can
+                // survive Kill(), and it must stay tracked so it can still be closed from here.
                 closed = p.WaitForExit(3000);
             }
         }
@@ -176,8 +176,8 @@ public static class InstanceControlService
 
         if (closed)
         {
-            // Drop it now rather than waiting for the next Prune, so the list updates immediately.
-            ProcessRegistry.Forget(pid);
+            // Prune rather than Forget: the exit is reported, so the session is booked as playtime.
+            ProcessRegistry.Prune();
             AuditLogService.Log(AuditLogService.Category.Launch, $"Closed client pid {pid}.");
         }
         return closed;
@@ -213,25 +213,9 @@ public static class InstanceControlService
     {
         try
         {
-            // Snapshot the tracked pids *before* the kill. Reading ProcessRegistry.All afterwards
-            // prunes the now-dead entries, and Prune raises ProcessRegistry.Exited — which the
-            // watchdog reads as a crash and answers by auto-rejoining (plus a Discord
-            // "Disconnected" and a crash toast) every account the user just asked to close.
-            var tracked = ProcessRegistry.All.Select(t => t.Pid).ToList();
-
+            // CloseAllClients flags every client as an intentional close before killing it, so the
+            // watchdog does not answer "close everything" by relaunching everything.
             int closed = LauncherService.CloseAllClients();
-
-            // CloseAllClients kills processes directly, so the registry still holds their entries.
-            // Forget(), never Prune(): Forget drops an entry silently, which is exactly what a
-            // deliberate close needs. Survivors stay tracked so the other services keep seeing them.
-            foreach (int pid in tracked)
-            {
-                bool gone;
-                try { using var p = Process.GetProcessById(pid); gone = p.HasExited; }
-                catch { gone = true; } // pid no longer resolves — it's gone
-                if (gone) ProcessRegistry.Forget(pid);
-            }
-
             if (closed > 0)
                 AuditLogService.Log(AuditLogService.Category.Launch, $"Closed all {closed} Roblox client(s).");
             return closed;
@@ -250,7 +234,7 @@ public static class InstanceControlService
         {
             // Actionable: the user pressed a button and nothing happened. Explain why.
             if (Count > 0)
-                ToastService.Warning("Nothing to arrange", "Roblox is still starting up — those clients have no window yet.");
+                ToastService.Warning(L.T("Clients.NothingToArrange.Title"), L.T("Clients.NothingToArrange.Body"));
             return 0;
         }
 

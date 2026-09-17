@@ -31,9 +31,7 @@ public static class HealthCheckService
     /// <summary>Below this, Roblox updates and crash dumps start failing in ways users blame on us.</summary>
     private const long MinFreeBytes = 2L * 1024 * 1024 * 1024;
 
-    private const string NetworkHint =
-        "No route to Roblox. Check your internet connection, VPN, firewall or hosts file — while this "
-        + "is red, logins, thumbnails, presence and launching will all fail.";
+    private static string NetworkHint => L.T("Check.Api.Hint");
 
     // One client for the lifetime of the app: a fresh HttpClient per run would leak sockets in
     // TIME_WAIT every time the user opens the Settings page.
@@ -130,19 +128,19 @@ public static class HealthCheckService
         {
             results.AddRange(await Task.Run(() => new[]
             {
-                Safe("Roblox installed",            ProbeRobloxInstalled),
-                Safe("Launch protocol registered",  ProbeProtocol),
-                Safe("Data folder writable",        ProbeDataFolder),
-                Safe("Free disk space",             ProbeDiskSpace),
+                Safe(L.T("Check.Installed"),  ProbeRobloxInstalled),
+                Safe(L.T("Check.Protocol"),   ProbeProtocol),
+                Safe(L.T("Check.DataFolder"), ProbeDataFolder),
+                Safe(L.T("Check.Disk"),       ProbeDiskSpace),
             }, ct).ConfigureAwait(false));
         }
         catch (OperationCanceledException) { return results; }
 
         if (ct.IsCancellationRequested) return results;
-        results.Add(await SafeAsync("Roblox API reachable", () => ProbeApiAsync(ct)).ConfigureAwait(false));
+        results.Add(await SafeAsync(L.T("Check.Api"), () => ProbeApiAsync(ct)).ConfigureAwait(false));
 
         if (ct.IsCancellationRequested) return results;
-        results.Add(Safe("Multi-instance guard", ProbeSingleton));
+        results.Add(Safe(L.T("Check.MultiInstance"), ProbeSingleton));
 
         // A run that has been overtaken must not publish: the newer one has fresher truth. The
         // test and the write are locked together because testing outside the lock leaves a window
@@ -185,7 +183,7 @@ public static class HealthCheckService
         }
         catch (Exception ex)
         {
-            return new Check { Title = title, Ok = false, Detail = $"Check failed: {ex.Message}" };
+            return new Check { Title = title, Ok = false, Detail = L.T("Check.Failed", ex.Message) };
         }
     }
 
@@ -199,7 +197,7 @@ public static class HealthCheckService
         }
         catch (Exception ex)
         {
-            return new Check { Title = title, Ok = false, Detail = $"Check failed: {ex.Message}" };
+            return new Check { Title = title, Ok = false, Detail = L.T("Check.Failed", ex.Message) };
         }
     }
 
@@ -224,9 +222,7 @@ public static class HealthCheckService
         string? describe = RobloxInstallService.DescribeInstall();
 
         if (describe is null)
-            return (false, "RobloxPlayerBeta.exe was not found in any known install location.",
-                "Install Roblox from roblox.com/download and run any game once. Nothing here can launch "
-                + "until the player exists on disk.");
+            return (false, L.T("Check.Installed.Missing"), L.T("Check.Installed.Hint"));
 
         return (true, describe, null);
     }
@@ -242,9 +238,7 @@ public static class HealthCheckService
         string command = key?.GetValue(null) as string ?? "";
 
         if (string.IsNullOrWhiteSpace(command))
-            return (false, "No handler registered for roblox-player://",
-                "Reinstall Roblox, or launch a game once from roblox.com, so it re-registers the protocol. "
-                + "Until then launches from this app are dropped by Windows.");
+            return (false, L.T("Check.Protocol.Missing"), L.T("Check.Protocol.Hint"));
 
         string exe = ExecutableFrom(command);
         string name = exe.Length == 0 ? command : Path.GetFileName(exe);
@@ -253,8 +247,7 @@ public static class HealthCheckService
         // rather than a failure — the user just needs to know who is really receiving the launch.
         string? hint = exe.Contains("roblox", StringComparison.OrdinalIgnoreCase)
             ? null
-            : $"“{name}” owns roblox-player:// — another launcher or bootstrapper has taken the "
-              + "protocol over. That is fine if you installed it on purpose; otherwise reinstall Roblox to take it back.";
+            : L.T("Check.Protocol.Other", name);
 
         return (true, name, hint);
     }
@@ -295,9 +288,7 @@ public static class HealthCheckService
         }
         catch (Exception ex)
         {
-            return (false, $"{Paths.DataDir} — {ex.Message}",
-                "Accounts, settings and backups cannot be saved. Move the manager out of Program Files, "
-                + "or exclude its folder from your antivirus.");
+            return (false, $"{Paths.DataDir}: {ex.Message}", L.T("Check.DataFolder.Hint"));
         }
         finally
         {
@@ -341,21 +332,20 @@ public static class HealthCheckService
     {
         string root = Path.GetPathRoot(Path.GetFullPath(Paths.DataDir)) ?? "";
         if (root.Length == 0)
-            return (false, "Could not identify the drive holding the data folder.", null);
+            return (false, L.T("Check.Disk.Unknown"), null);
 
         // A UNC data folder has no DriveInfo; the app still works, so do not fail the checklist.
         if (root.StartsWith(@"\\", StringComparison.Ordinal))
-            return (true, "Network location — free space is not measurable.", null);
+            return (true, L.T("Check.Disk.Network"), null);
 
         var drive = new DriveInfo(root);
         long free = drive.AvailableFreeSpace;   // quota-aware, unlike TotalFreeSpace
-        string detail = (free / (1024d * 1024d * 1024d)).ToString("0.0", CultureInfo.InvariantCulture) + " GB free";
+        string detail = L.T("Check.Disk.Free", (free / (1024d * 1024d * 1024d)).ToString("0.0", CultureInfo.CurrentCulture));
 
         return free >= MinFreeBytes
             ? (true, detail, null)
             : (false, detail,
-               $"Less than 2 GB free on {drive.Name} — Roblox updates, crash dumps and backups will start "
-               + "failing. Free some space before launching.");
+               L.T("Check.Disk.Hint", drive.Name));
     }
 
     /// <summary>
@@ -377,20 +367,18 @@ public static class HealthCheckService
                 HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
             sw.Stop();
 
-            string detail = $"HTTP {(int)resp.StatusCode} in {sw.ElapsedMilliseconds} ms";
+            string detail = L.T("Check.Api.Detail", (int)resp.StatusCode, sw.ElapsedMilliseconds);
             return resp.IsSuccessStatusCode
                 ? (true, detail, null)
-                : (false, detail,
-                   "Roblox answered, but not with success — the service may be having an outage, or a "
-                   + "proxy/content filter is rewriting the response.");
+                : (false, detail, L.T("Check.Api.BadStatus"));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return (false, $"No answer within {ApiTimeoutSeconds} s.", NetworkHint);
+            return (false, L.T("Check.Api.Timeout", ApiTimeoutSeconds), NetworkHint);
         }
         catch (OperationCanceledException)
         {
-            return (false, "Cancelled.", null);   // the caller went away; not the user's problem
+            return (false, L.T("Check.Cancelled"), null);   // the caller went away; not the user's problem
         }
         catch (Exception ex)
         {
@@ -407,17 +395,13 @@ public static class HealthCheckService
         // Turning the feature off is a choice, not a fault — a red row here would train the user
         // to ignore the whole checklist.
         if (!SettingsService.Current.EnableMultiInstance)
-            return (true, "Disabled in settings — one Roblox client at a time.", null);
+            return (true, L.T("Check.MultiInstance.Off"), null);
 
         if (RobloxSingletonService.AccessDenied)
-            return (false, "Windows blocked access to a running Roblox client.",
-                "Restart the manager as administrator (Settings → Launch) or extra clients started "
-                + "from the website will not open.");
+            return (false, L.T("Check.MultiInstance.Denied"), L.T("Check.MultiInstance.DeniedHint"));
 
         return RobloxSingletonService.MutexHeld
-            ? (true, $"Mutex held, {RobloxSingletonService.TotalClosed} lock(s) cleared this session.", null)
-            : (false, "Multi-instance is on, but the Roblox mutex is not held.",
-               "Toggle multi-instance off and on in Settings → Launch before starting a second client, "
-               + "or the second launch will be swallowed by the first.");
+            ? (true, L.T("Check.MultiInstance.Ok", RobloxSingletonService.TotalClosed), null)
+            : (false, L.T("Check.MultiInstance.NoMutex"), L.T("Check.MultiInstance.NoMutexHint"));
     }
 }

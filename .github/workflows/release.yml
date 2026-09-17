@@ -56,6 +56,12 @@ jobs:
         env:
           INPUT_TAG: ${{ github.event.inputs.tag }}
 
+      - name: Check translations
+        shell: pwsh
+        # Every UI string the code uses must exist in English, and every other language must carry the
+        # same keys and placeholders — a broken {0} would otherwise only show up on a user's screen.
+        run: python tools/check-localization.py
+
       - name: Build (0 warnings required)
         shell: pwsh
         run: dotnet build src/RobloxAccountManager.csproj -c Release --nologo -warnaserror

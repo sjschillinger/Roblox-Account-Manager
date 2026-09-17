@@ -1,53 +1,75 @@
+using System.Text.Json.Serialization;
+using RobloxAccountManager.Services;
+
 namespace RobloxAccountManager.Models;
 
 public class AppSettings
 {
+    /// <summary>
+    /// Schema version of settings.json. 0 means "written by v1.x" — see SettingsService.Migrate.
+    /// A brand-new install starts at <see cref="SettingsService.CurrentSchema"/>.
+    /// </summary>
+    public int SettingsVersion { get; set; } = 0;
+
     // ---- Launch ----
     public bool EnableMultiInstance { get; set; } = true;   // hold ROBLOX_singletonMutex open
 
     // Newer Roblox clients keep a second guard, ROBLOX_singletonEvent, inside their own process.
-    // Holding the mutex does nothing about it, which is why a launch started from the website or
-    // the Roblox home screen used to be swallowed by the client that was already running.
-    // Closing that handle in every live client makes those launches open a new window too.
+    // Closing that handle in every live client makes launches from the website open a new window.
     public bool CloseSingletonEvent { get; set; } = true;
-    public int SingletonWatchSeconds { get; set; } = 2;      // how often new clients are checked
-    public bool AdoptExternalClients { get; set; } = true;   // manage clients started outside the app
-    public bool MultiInstanceStartupCheck { get; set; } = true; // warn once if the guard can't run
+    public int SingletonWatchSeconds { get; set; } = 2;
+    public bool AdoptExternalClients { get; set; } = true;
+    public bool MultiInstanceStartupCheck { get; set; } = true;
 
     public int AccountJoinDelay { get; set; } = 8;          // seconds between sequential launches
     public bool AutoCloseLastProcess { get; set; } = true;  // close the same account's previous client
-    public bool ShuffleLowestServer { get; set; } = false;  // "join" picks the emptiest server
-    public int ShufflePageCount { get; set; } = 5;          // server pages scanned when shuffling
-    public bool RememberWindowPositions { get; set; } = false;
+    public bool ShuffleLowestServer { get; set; } = false;  // smart join picks the emptiest server
+    public int ShufflePageCount { get; set; } = 5;          // server pages scanned
 
-    // ---- FPS ----
-    public bool UnlockFps { get; set; } = false;
-    public int MaxFps { get; set; } = 240;
+    /// <summary>
+    /// Frame-rate cap written into Roblox's own settings file before a launch; 0 leaves Roblox's
+    /// setting alone. Replaces the old DFIntTaskSchedulerTargetFps flag, which the client has
+    /// ignored since Roblox's FastFlag allowlist (September 2025).
+    /// </summary>
+    public int FpsCap { get; set; } = 0;
 
     // ---- Presence / live data ----
     public bool ShowPresence { get; set; } = true;
-    public int PresenceUpdateRate { get; set; } = 5;        // minutes
-    public int PresencePollSeconds { get; set; } = 10;      // live dashboard poll cadence (seconds)
+    public int PresencePollSeconds { get; set; } = 10;
     public bool ShowThumbnails { get; set; } = true;
     public bool ShowRobux { get; set; } = true;
-    public bool TrackEconomy { get; set; } = true;         // collectible RAP + premium membership
+    public bool TrackEconomy { get; set; } = true;          // collectible RAP + premium membership
+    public bool TrackPlaytime { get; set; } = true;
 
     // ---- Interface ----
     public bool HideUsernames { get; set; } = false;
     public bool MinimizeToTray { get; set; } = true;
-    public string AccentColor { get; set; } = "#7B61FF";
-    public int MaxRecentGames { get; set; } = 12;
-    public string LastSeenVersion { get; set; } = "";       // last version the "What's new" window ran for
-    public string UpdateNotesSeenFor { get; set; } = "";    // one-shot: version whose notes the update prompt already showed
+    public string LastSeenVersion { get; set; } = "";
+    public string UpdateNotesSeenFor { get; set; } = "";
+    public bool SidebarCollapsed { get; set; } = false;
+    public string AccountSort { get; set; } = "Name";       // Name | Recent | Robux | Playtime | Status
+    public bool GroupAccounts { get; set; } = true;
 
-    // ---- Appearance (#30 UX-Politur: Theme-Editor / Views / i18n / Notif) ----
-    public string ThemeName { get; set; } = "Avallon (mono)";          // built-in preset name
-    public Dictionary<string, string> CustomTheme { get; set; } = new(); // per-key hex overrides
-    public string AccountViewMode { get; set; } = "Card";              // Card | Compact
-    public string Language { get; set; } = "en";                       // en | de
-    public bool EnableToasts { get; set; } = true;                     // in-app toast notifications
-    public bool ToastOnLaunch { get; set; } = true;                    // toast when a client launches
-    public bool ToastOnCrash { get; set; } = true;                     // toast when a client crashes
+    // ---- Appearance ----
+    public string ThemeMode { get; set; } = ThemeService.ModeDark;   // Dark | Light | System
+    public string AccentName { get; set; } = "Mono";
+    public Dictionary<string, string> CustomTheme { get; set; } = new();
+    public string AccountViewMode { get; set; } = "Card";            // Card | Compact
+    public string Language { get; set; } = "";                       // "" = follow Windows
+
+    /// <summary>v1.x theme preset name; read once for migration and never written again.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ThemeName { get; set; }
+
+    // ---- Notifications ----
+    public bool EnableToasts { get; set; } = true;
+    public bool ToastOnLaunch { get; set; } = true;
+    public bool ToastOnCrash { get; set; } = true;
+
+    [JsonConverter(typeof(ProtectedStringConverter))]
+    public string DiscordWebhookUrl { get; set; } = "";
+    public bool NotifyOnCrash { get; set; } = true;
+    public bool NotifyOnConnect { get; set; } = false;
 
     // ---- Data ----
     public long DefaultPlaceId { get; set; } = 0;
@@ -56,18 +78,13 @@ public class AppSettings
 
     // ---- Anti-AFK ----
     public bool AntiAfkEnabled { get; set; } = false;
-    public int AntiAfkIntervalMinutes { get; set; } = 15;   // one input per this many minutes
-    public string AntiAfkKey { get; set; } = "Space";       // Space/Shift/Ctrl/W/A/S/D/0/F13
-    public bool AntiAfkRestoreFocus { get; set; } = true;   // return to the user's window afterwards
+    public int AntiAfkIntervalMinutes { get; set; } = 15;
+    public string AntiAfkKey { get; set; } = "Space";
+    public bool AntiAfkRestoreFocus { get; set; } = true;
 
     // ---- Crash watchdog ----
     public bool WatchdogEnabled { get; set; } = false;
     public int WatchdogCheckSeconds { get; set; } = 30;
-
-    // ---- Notifications ----
-    public string DiscordWebhookUrl { get; set; } = "";
-    public bool NotifyOnCrash { get; set; } = true;    // disconnect + reconnect embeds
-    public bool NotifyOnConnect { get; set; } = false; // embed when an account launches/connects
 
     // ---- Startup checks ----
     public bool ValidateCookiesOnStartup { get; set; } = false;
@@ -77,38 +94,56 @@ public class AppSettings
     public List<ScheduledTask> ScheduledTasks { get; set; } = new();
 
     // ---- FastFlags ----
-    // Written to <RobloxVersion>\ClientSettings\ClientAppSettings.json before launch.
+    // Written to ClientAppSettings.json before launch. Since September 2025 the client only honours
+    // flags on Roblox's allowlist, so the convenience options below are all allowlisted ones.
     public bool ApplyFFlags { get; set; } = false;
-    // Convenience toggles that expand into well-known flags at write time.
-    public bool FFlagUnlockFps { get; set; } = false;       // DFIntTaskSchedulerTargetFps
-    public bool FFlagDisableTelemetry { get; set; } = false;
-    public bool FFlagLightingTechVoxel { get; set; } = false;
-    public bool FFlagDisableVoiceChat { get; set; } = false;
-    // Raw user-supplied flags, merged last so they always win.
+    public string GraphicsApi { get; set; } = "Auto";       // Auto | D3D11 | Vulkan | OpenGL
+    public int MsaaSamples { get; set; } = -1;              // -1 auto, 0/1/2/4/8
+    public int TextureQuality { get; set; } = -1;           // -1 auto, 0..3
+    public int QualityLevelOverride { get; set; } = 0;      // 0 auto, 1..21
+    public bool DisableDpiScale { get; set; } = false;
+    public bool HideGrass { get; set; } = false;
+    public bool GraySky { get; set; } = false;
+    public bool PauseVoxelizer { get; set; } = false;
+    public bool AltEnterFullscreen { get; set; } = false;
     public Dictionary<string, string> CustomFFlags { get; set; } = new();
 
-    // ---- Proxy (for this manager's Roblox web/API calls) ----
+    // ---- Proxy (the manager's own Roblox web calls) ----
     public bool EnableProxy { get; set; } = false;
-    public string ProxyAddress { get; set; } = "";          // http://host:port or socks5://host:port
+    public string ProxyAddress { get; set; } = "";
     public string ProxyUsername { get; set; } = "";
+
+    [JsonConverter(typeof(ProtectedStringConverter))]
     public string ProxyPassword { get; set; } = "";
+
+    // ---- Browser ----
+    /// <summary>Auto | CloakBrowser | Edge | Chrome — which browser opens accounts and browser sign-ins.</summary>
+    public string BrowserEngine { get; set; } = "Auto";
 
     // ---- Web API (localhost control server) ----
     public bool WebApiEnabled { get; set; } = false;
-    public int WebApiPort { get; set; } = 7963;             // 127.0.0.1:{port}, user-scoped bind
-    public string WebApiToken { get; set; } = "";           // bearer token; empty = surface disabled
+    public int WebApiPort { get; set; } = 7963;
+
+    [JsonConverter(typeof(ProtectedStringConverter))]
+    public string WebApiToken { get; set; } = "";
+
+    /// <summary>The /cookie endpoint hands out full account access, so it is off unless asked for.</summary>
+    public bool WebApiAllowCookieRead { get; set; } = false;
+
+    // ---- Plugins ----
+    /// <summary>Plugins run arbitrary code inside the manager, so loading them is opt-in.</summary>
+    public bool EnablePlugins { get; set; } = false;
 
     // ---- RAM monitor ----
     public bool RamMonitorEnabled { get; set; } = false;
-    public int RamMonitorSeconds { get; set; } = 10;        // poll interval
-    public bool AutoCloseOnHighRam { get; set; } = false;   // kill a client over the limit
-    public int RamLimitMb { get; set; } = 4096;             // per-client working-set cap
-    public bool AutoTrimEnabled { get; set; } = false;      // periodically page idle memory out
-    public int AutoTrimMinutes { get; set; } = 10;          // how often auto-trim runs
+    public int RamMonitorSeconds { get; set; } = 10;
+    public bool AutoCloseOnHighRam { get; set; } = false;
+    public int RamLimitMb { get; set; } = 4096;
+    public bool AutoTrimEnabled { get; set; } = false;
+    public int AutoTrimMinutes { get; set; } = 10;
 
-    // ---- global hotkeys (#29 Power-Tools) ----
-    // Disabled by default so a fresh install never steals a system-wide chord, but
-    // each slot is pre-filled with a sensible combo the user only has to toggle on.
+    // ---- Global hotkeys ----
+    // Disabled by default so a fresh install never steals a system-wide chord.
     // Modifiers bitmask: Alt=1, Ctrl=2, Shift=4, Win=8. Key = Win32 virtual-key code.
     public List<HotkeyBinding> Hotkeys { get; set; } = new()
     {
@@ -118,32 +153,34 @@ public class AppSettings
         new HotkeyBinding { Action = "FocusManager",      Modifiers = 3, Key = 0x52 }, // Ctrl+Alt+R
     };
 
-    // ---- security-extra ----
-    public bool AutoLockEnabled { get; set; } = false;          // lock the app after idle
-    public int AutoLockMinutes { get; set; } = 10;              // idle minutes before locking
-    public bool AuditLogEnabled { get; set; } = false;          // append security events to data/audit.log
-    public bool RotationDetectionEnabled { get; set; } = true;  // capture rotated .ROBLOSECURITY on launch
+    // ---- Security ----
+    public bool AutoLockEnabled { get; set; } = false;          // lock after idle (needs a master password)
+    public int AutoLockMinutes { get; set; } = 10;
+    public bool LockOnMinimize { get; set; } = false;           // lock when hidden to the tray
+    public int ClipboardClearSeconds { get; set; } = 30;        // wipe copied cookies / codes (0 = never)
+    public bool AuditLogEnabled { get; set; } = false;
+    public bool RotationDetectionEnabled { get; set; } = true;
 
     // ---- Updates ----
-    // The update check used to be unconditional and ran every 5 minutes with no way to turn it
-    // off, which burns GitHub's 60-requests-per-hour anonymous budget for no benefit on a machine
-    // that stays open all day. All of it is user-controlled now.
-    public bool AutoCheckUpdates { get; set; } = true;          // background poll on/off
-    public bool CheckUpdatesOnStartup { get; set; } = true;     // one check when the app opens
-    public int UpdateCheckMinutes { get; set; } = 60;           // background poll interval (>= 15)
-    public bool IncludePrereleases { get; set; } = false;       // offer releases marked "pre-release"
-    public string SkippedUpdateVersion { get; set; } = "";      // "v1.7.1" — never prompt for this one again
-    public bool VerifyUpdateDownload { get; set; } = true;      // hash/size/PE checks before the swap
-    public bool KeepUpdateBackup { get; set; } = true;          // keep <exe>.bak so a rollback is possible
+    public bool AutoCheckUpdates { get; set; } = true;
+    public bool CheckUpdatesOnStartup { get; set; } = true;
+    public int UpdateCheckMinutes { get; set; } = 60;
+    public bool IncludePrereleases { get; set; } = false;
+    public string SkippedUpdateVersion { get; set; } = "";
+    public bool VerifyUpdateDownload { get; set; } = true;
+    public bool KeepUpdateBackup { get; set; } = true;
 
     // ---- Windows startup ----
-    public bool StartWithWindows { get; set; } = false;         // HKCU ...\CurrentVersion\Run entry
-    public bool StartMinimized { get; set; } = false;           // launch straight to the tray
-
-    // ---- Playtime ----
-    public bool TrackPlaytime { get; set; } = true;             // record per-account client sessions
+    public bool StartWithWindows { get; set; } = false;
+    public bool StartMinimized { get; set; } = false;
 
     // ---- housekeeping ----
-    public double WindowWidth { get; set; } = 1120;
-    public double WindowHeight { get; set; } = 720;
+    public double WindowWidth { get; set; } = 1280;
+    public double WindowHeight { get; set; } = 800;
+    public bool WindowMaximized { get; set; } = false;
+
+    // ---- v1.x fields, read for migration only ----
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool UnlockFps { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public int MaxFps { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool FFlagUnlockFps { get; set; }
 }

@@ -3,11 +3,9 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Interop;
 using RobloxAccountManager.Services;
 
 namespace RobloxAccountManager.Views;
@@ -73,25 +71,27 @@ public partial class UpdaterWindow : Window
             ? Path.Combine(Path.GetTempPath(), "RobloxAccountManagerUpdate")
             : procDir;
 
+        HeaderText.Text = L.T("Updater.Title", _versionText);
+        StatusText.Text = L.T("Updater.Preparing");
+        CancelButton.Content = L.T("Common.Cancel");
+        RetryButton.Content = L.T("Updater.Retry");
+        StartAnywayButton.Content = L.T("Updater.StartAnyway");
+
         Loaded += async (_, _) => await RunAsync();
     }
 
-    // ---- Windows 11 rounded corners (same DWM treatment as MainWindow) ----
-    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
-    private const int DWMWCP_ROUND = 2;
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
-
-    protected override void OnSourceInitialized(EventArgs e)
+    /// <summary>
+    /// Where the new build is written. The version is part of the name so a partial download of a
+    /// different release is never resumed into this one (that produced a file whose checksum could
+    /// never match, and every retry failed the same way).
+    /// </summary>
+    private string DownloadPath
     {
-        base.OnSourceInitialized(e);
-        try
+        get
         {
-            var handle = new WindowInteropHelper(this).Handle;
-            int pref = DWMWCP_ROUND;
-            DwmSetWindowAttribute(handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, sizeof(int));
+            string safe = new string(_versionText.Where(c => char.IsLetterOrDigit(c) || c is '.' or '-').ToArray());
+            return Path.Combine(_tempDir, $"update-{(safe.Length == 0 ? "latest" : safe)}.exe");
         }
-        catch { }
     }
 
     // ---- update pipeline ----
@@ -108,27 +108,27 @@ public partial class UpdaterWindow : Window
         try
         {
             // 1) Wait for the main app to exit so its exe file lock is released.
-            SetStatus("Waiting for Roblox Account Manager to close…");
+            SetStatus(L.T("Updater.WaitingForApp"));
             await WaitForMainExitAsync();
 
             // 2) Fetch the new exe next to this updater, resuming a partial file if one is there.
-            SetStatus($"Downloading {_versionText}…");
-            string downloadPath = Path.Combine(_tempDir, "update.exe");
+            SetStatus(L.T("Updater.Downloading", _versionText));
+            string downloadPath = DownloadPath;
             _downloadCts = new CancellationTokenSource();
             await FetchAsync(downloadPath, _downloadCts.Token);
 
             // 3) Make sure what arrived is actually the application before it replaces one.
-            SetStatus("Verifying the download…");
+            SetStatus(L.T("Updater.Verifying"));
             SetDetail("");
             await VerifyAsync(downloadPath, _downloadCts.Token);
 
             // 4) Swap the exe in place — point of no return, so cancel is disabled here.
             CancelButton.IsEnabled = false;
-            SetStatus($"Installing {_versionText}…");
+            SetStatus(L.T("Updater.Installing", _versionText));
             await ReplaceMainExeAsync(downloadPath);
 
             // 5) Relaunch the updated app; it cleans this temp folder up in the background.
-            SetStatus("Starting the updated app…");
+            SetStatus(L.T("Updater.Starting"));
             var psi = new ProcessStartInfo(_mainExePath) { UseShellExecute = false };
             psi.ArgumentList.Add("--post-update");
             psi.ArgumentList.Add(_tempDir);
@@ -145,8 +145,8 @@ public partial class UpdaterWindow : Window
         {
             Debug.WriteLine($"[Updater] Update failed: {ex}");
             RestoreBackupIfNeeded();
-            SetStatus($"Update failed: {Shorten(ex.Message)}");
-            SetDetail("Your current version is untouched — you can retry or keep using it.");
+            SetStatus(L.T("Updater.Failed", Shorten(ex.Message)));
+            SetDetail(L.T("Updater.Untouched"));
             Progress.Value = 0;
             PercentText.Text = "";
             CancelButton.Visibility = Visibility.Collapsed;
@@ -185,12 +185,21 @@ public partial class UpdaterWindow : Window
     {
         if (Uri.TryCreate(_downloadUrl, UriKind.Absolute, out var uri) && uri.IsFile)
         {
-            SetStatus($"Restoring {_versionText}…");
+            // A rollback may only restore the backup this app itself kept next to the exe.
+            string expected = Path.GetFullPath(_mainExePath + UpdateService.BackupSuffix);
+            if (!string.Equals(Path.GetFullPath(uri.LocalPath), expected, StringComparison.OrdinalIgnoreCase))
+                throw new IOException(L.T("Updater.UntrustedSource"));
+
+            SetStatus(L.T("Updater.Restoring", _versionText));
             File.Copy(uri.LocalPath, destination, overwrite: true);
             Progress.Value = 100;
             PercentText.Text = "100%";
             return;
         }
+
+        // Only GitHub release downloads are installed; the URL arrives on the command line.
+        if (!UpdateService.IsTrustedDownloadUrl(_downloadUrl))
+            throw new IOException(L.T("Updater.UntrustedSource"));
 
         Exception? last = null;
         for (int attempt = 1; attempt <= MaxDownloadAttempts; attempt++)
@@ -207,11 +216,11 @@ public partial class UpdaterWindow : Window
                 // already on disk are still good, so keep them and let the next attempt resume.
                 last = ex;
                 if (attempt == MaxDownloadAttempts) break;
-                SetStatus($"Connection lost — retrying ({attempt + 1}/{MaxDownloadAttempts})…");
+                SetStatus(L.T("Updater.Retrying", attempt + 1, MaxDownloadAttempts));
                 await Task.Delay(TimeSpan.FromSeconds(2 * attempt), ct);
             }
         }
-        throw new IOException($"The download failed after {MaxDownloadAttempts} attempts.", last);
+        throw new IOException(L.T("Updater.DownloadFailed", MaxDownloadAttempts), last);
     }
 
     private async Task DownloadAsync(string destination, CancellationToken ct)
@@ -277,7 +286,7 @@ public partial class UpdaterWindow : Window
         }
 
         ReportProgress(done, total, null);
-        if (done == 0) throw new IOException("The downloaded file is empty.");
+        if (done == 0) throw new IOException(L.T("Updater.Empty"));
     }
 
     private void ReportProgress(long done, long total, double? bytesPerSecond)
@@ -287,27 +296,26 @@ public partial class UpdaterWindow : Window
             int pct = (int)Math.Min(100, done * 100 / total);
             Progress.Value = pct;
             PercentText.Text = $"{pct}%";
-            SetDetail($"{Mb(done)} of {Mb(total)}{Rate(bytesPerSecond)}{Eta(total - done, bytesPerSecond)}");
+            SetDetail(L.T("Updater.Progress", Mb(done), Mb(total)) + Rate(bytesPerSecond) + Eta(total - done, bytesPerSecond));
         }
         else
         {
             PercentText.Text = Mb(done);
-            SetDetail(Rate(bytesPerSecond).TrimStart(' ', '·', ' '));
+            SetDetail(Rate(bytesPerSecond).TrimStart(',', ' '));
         }
     }
 
     private static string Mb(long bytes) => $"{bytes / (1024.0 * 1024.0):0.0} MB";
 
     private static string Rate(double? bytesPerSecond)
-        => bytesPerSecond is > 0 ? $" · {bytesPerSecond.Value / (1024.0 * 1024.0):0.0} MB/s" : "";
+        => bytesPerSecond is > 0 ? $", {bytesPerSecond.Value / (1024.0 * 1024.0):0.0} MB/s" : "";
 
     private static string Eta(long remaining, double? bytesPerSecond)
     {
         if (bytesPerSecond is not > 0 || remaining <= 0) return "";
         var left = TimeSpan.FromSeconds(remaining / bytesPerSecond.Value);
-        return left.TotalMinutes >= 1
-            ? $" · {left.Minutes}m {left.Seconds}s left"
-            : $" · {Math.Max(1, left.Seconds)}s left";
+        string time = left.TotalMinutes >= 1 ? $"{(int)left.TotalMinutes}m {left.Seconds}s" : $"{Math.Max(1, left.Seconds)}s";
+        return ", " + L.T("Updater.Left", time);
     }
 
     // ---- verification ----
@@ -321,21 +329,20 @@ public partial class UpdaterWindow : Window
     private async Task VerifyAsync(string path, CancellationToken ct)
     {
         var file = new FileInfo(path);
-        if (!file.Exists || file.Length == 0) throw new IOException("The downloaded file is empty.");
+        if (!file.Exists || file.Length == 0) throw new IOException(L.T("Updater.Empty"));
 
         // A Windows executable begins with "MZ". HTML, JSON and plain text never do.
         await using (var head = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
             var magic = new byte[2];
             if (await head.ReadAsync(magic.AsMemory(0, 2), ct) != 2 || magic[0] != 0x4D || magic[1] != 0x5A)
-                throw new IOException("The download is not a Windows application — GitHub may have returned an error page.");
+                throw Rejected(path, L.T("Updater.NotAnExe"));
         }
 
         if (!_verify) return;
 
         if (_expectedSize > 0 && file.Length != _expectedSize)
-            throw new IOException(
-                $"The download is incomplete ({Mb(file.Length)} of {Mb(_expectedSize)}).");
+            throw Rejected(path, L.T("Updater.Incomplete", Mb(file.Length), Mb(_expectedSize)));
 
         if (_expectedSha256 == null) return;
 
@@ -346,7 +353,17 @@ public partial class UpdaterWindow : Window
         }, ct);
 
         if (actual != _expectedSha256)
-            throw new IOException("The download's checksum does not match the one published for this release.");
+            throw Rejected(path, L.T("Updater.ChecksumMismatch"));
+    }
+
+    /// <summary>
+    /// Deletes a download that failed verification, so Retry fetches a fresh copy instead of
+    /// resuming (and failing again on) the same bad bytes.
+    /// </summary>
+    private static IOException Rejected(string path, string message)
+    {
+        try { File.Delete(path); } catch { }
+        return new IOException(message);
     }
 
     // ---- install ----
@@ -401,7 +418,7 @@ public partial class UpdaterWindow : Window
 
         // Out of attempts: put the previous build back so the user is left with a working app.
         RestoreBackupIfNeeded();
-        throw new IOException($"Could not replace the application executable after {MaxReplaceAttempts} attempts.", last);
+        throw new IOException(L.T("Updater.ReplaceFailed", MaxReplaceAttempts), last);
     }
 
     /// <summary>

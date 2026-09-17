@@ -11,7 +11,7 @@
     <RootNamespace>RobloxAccountManager</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <Version>1.7.0</Version>
+    <Version>2.0.0</Version>
     <Product>Roblox Account Manager</Product>
     <Company>RAM</Company>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -29,6 +29,18 @@
        alt-tab, titlebar) instead of soft-scaling a single 256px bitmap. -->
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+
+  <!-- Montserrat (SIL Open Font License, see Assets/Fonts/OFL.txt), subset for page titles and
+       figures. Loaded through a pack URI, so nothing gets installed on the user's PC. -->
+  <ItemGroup>
+    <Resource Include="Assets\Fonts\*.ttf" />
+  </ItemGroup>
+
+  <!-- UI text for every language. English is the source of truth and the fallback for missing keys;
+       tools/check-localization.py verifies the other files against it before a release. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Localization\*.json" LogicalName="Localization.%(Filename).json" />
   </ItemGroup>
 
   <!-- Ship the changelog inside the exe.

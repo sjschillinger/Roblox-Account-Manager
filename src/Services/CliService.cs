@@ -29,11 +29,17 @@ public static class CliService
         if (idx < 0 || idx + 2 >= args.Length)
             return "No actionable CLI arguments.";
 
+        if (LockService.IsLocked)
+        {
+            vm.SetStatus(L.T("Lock.Blocked"));
+            return L.T("Lock.Blocked");
+        }
+
         string who = args[idx + 1];
 
         var digits = new string(args[idx + 2].Where(char.IsDigit).ToArray());
         if (!long.TryParse(digits, out long placeId) || placeId <= 0)
-            return $"CLI: invalid placeId '{args[idx + 2]}'.";
+            return L.T("Cli.BadPlace", args[idx + 2]);
 
         // Optional 4th token is a Job ID, unless it's the next flag.
         string? jobId = idx + 3 < args.Length && !args[idx + 3].StartsWith("--")
@@ -43,16 +49,16 @@ public static class CliService
         var acc = FindAccount(vm.Store, who);
         if (acc == null)
         {
-            string miss = $"CLI: no account matching '{who}'.";
+            string miss = L.T("Cli.NoAccount", who);
             vm.SetStatus(miss);
             return miss;
         }
 
-        vm.SetStatus($"CLI launch: {acc.DisplayNameOrUser} → {placeId}…");
+        vm.SetStatus(L.T("Cli.Launching", acc.DisplayNameOrUser));
         var r = await LauncherService.LaunchAsync(acc, placeId, jobId);
         string msg = r.Success
-            ? $"CLI launched {acc.DisplayNameOrUser}."
-            : $"CLI launch failed: {r.Message}";
+            ? L.T("Status.Launched", acc.DisplayNameOrUser)
+            : r.Message;
         vm.SetStatus(msg);
         return msg;
     }

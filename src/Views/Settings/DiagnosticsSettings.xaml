@@ -1,0 +1,94 @@
+<UserControl x:Class="RobloxAccountManager.Views.Settings.DiagnosticsSettings"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:RobloxAccountManager.Controls">
+    <StackPanel>
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Diagnostics}" FontFamily="{StaticResource DisplayFont}" FontSize="18" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}" />
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.Diagnostics.Desc}" Style="{StaticResource Text.Caption}" FontSize="13" Margin="0,4,0,22" />
+
+        <Grid Margin="0,0,0,10">
+            <TextBlock Text="{DynamicResource Str.Diagnostics.Health}" Style="{StaticResource Text.Section}" Margin="2,0,0,0" VerticalAlignment="Center" />
+            <Button Style="{StaticResource Btn.Secondary}" HorizontalAlignment="Right" ctl:Ui.Icon="{StaticResource Icon.Activity}"
+                    Content="{DynamicResource Str.Diagnostics.Run}" Command="{Binding RunHealthCheckCommand}"
+                    IsEnabled="{Binding HealthRunning, Converter={StaticResource InverseBool}}" />
+        </Grid>
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
+            <Grid>
+                <TextBlock Text="{DynamicResource Str.Diagnostics.Health.Empty}" Style="{StaticResource Text.Caption}" Margin="18,16"
+                           Visibility="{Binding HealthChecks.Count, Converter={StaticResource CountZeroToVis}}" />
+                <ItemsControl ItemsSource="{Binding HealthChecks}" Focusable="False">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><ctl:DividerStack /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="18,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Path x:Name="icon" Data="{StaticResource Icon.CheckCircle}" Style="{StaticResource IconPath}" Stroke="{DynamicResource SuccessBrush}"
+                                      VerticalAlignment="Top" Margin="0,1,12,0" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding Title}" FontWeight="Medium" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock Text="{Binding Detail}" Style="{StaticResource Text.Caption}" Margin="0,2,0,0" />
+                                    <TextBlock Text="{Binding Hint}" Style="{StaticResource Text.Caption}" Margin="0,4,0,0" Foreground="{DynamicResource WarningBrush}"
+                                               Visibility="{Binding HasHint, Converter={StaticResource BoolToVis}}" />
+                                </StackPanel>
+                            </Grid>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding Ok}" Value="False">
+                                    <Setter TargetName="icon" Property="Data" Value="{StaticResource Icon.AlertCircle}" />
+                                    <Setter TargetName="icon" Property="Stroke" Value="{DynamicResource WarningBrush}" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+        </Border>
+
+        <TextBlock Text="{DynamicResource Str.Diagnostics.Logs}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.Diagnostics.Log.Title}" Description="{Binding DiagnosticsStatus}">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource Btn.Ghost}" Content="{DynamicResource Str.Common.Clear}" Command="{Binding ClearDiagnosticsCommand}" />
+                        <Button Style="{StaticResource Btn.Secondary}" Margin="8,0,0,0" Content="{DynamicResource Str.Common.OpenFolder}" Command="{Binding OpenDiagnosticsCommand}" />
+                    </StackPanel>
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Diagnostics.Data.Title}" Description="{Binding DataFolder}">
+                    <Button Style="{StaticResource Btn.Secondary}" Content="{DynamicResource Str.Common.OpenFolder}" Command="{Binding OpenDataFolderCommand}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.Diagnostics.Roblox.Title}" Description="{Binding InstallStatus}" />
+            </ctl:DividerStack>
+        </Border>
+
+        <TextBlock Text="{DynamicResource Str.Diagnostics.About}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Padding="18,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Image Source="pack://application:,,,/Assets/app.ico" Width="40" Height="40" Margin="0,0,14,0" RenderOptions.BitmapScalingMode="HighQuality" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Roblox Account Manager" FontFamily="{StaticResource DisplayFont}" FontSize="15" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <TextBlock Style="{StaticResource Text.Caption}" Margin="0,3,0,0">
+                        <Run Text="{Binding AppVersion, Mode=OneWay}" /><Run Text="  " /><Run Text="{DynamicResource Str.Diagnostics.License}" />
+                    </TextBlock>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Style="{StaticResource Btn.Ghost}" ctl:Ui.Icon="{StaticResource Icon.External}" Content="GitHub"
+                            Command="{Binding OpenUrlCommand}" CommandParameter="https://github.com/Vaelixx/Roblox-Account-Manager" />
+                    <Button Style="{StaticResource Btn.Ghost}" Margin="4,0,0,0" ctl:Ui.Icon="{StaticResource Icon.AlertCircle}"
+                            Content="{DynamicResource Str.Diagnostics.Report}"
+                            Command="{Binding OpenUrlCommand}" CommandParameter="https://github.com/Vaelixx/Roblox-Account-Manager/issues/new" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </StackPanel>
+</UserControl>

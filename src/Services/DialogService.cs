@@ -4,22 +4,30 @@ using RobloxAccountManager.Views;
 
 namespace RobloxAccountManager.Services;
 
-/// <summary>Small helper so view-models can prompt without referencing Window types directly.</summary>
+/// <summary>Lets view-models prompt the user without referencing window types directly.</summary>
 public static class DialogService
 {
     private static Window? Owner => Application.Current?.MainWindow;
 
+    private static int _openModals;
+
+    /// <summary>True while any modal dialog is open — the main window dims itself behind it.</summary>
+    public static bool IsModalOpen => _openModals > 0;
+
+    /// <summary>Raised on the UI thread whenever <see cref="IsModalOpen"/> may have changed.</summary>
+    public static event Action? ModalStateChanged;
+
     /// <summary>
-    /// Parents the dialog to the main window only if that window is actually
-    /// visible on screen. Otherwise the dialog centers itself and gets its own
-    /// taskbar entry — an owned dialog of an invisible window has no taskbar
-    /// presence and can sit unnoticed while it blocks startup.
+    /// Parents the dialog to the main window only when that window is on screen. An owned dialog of
+    /// an invisible window has no taskbar presence and can sit unnoticed while it blocks startup.
     /// </summary>
-    private static void AttachOwner(Window dlg)
+    private static void AttachOwner(Window dlg, Window? preferred = null)
     {
-        if (Owner != null && Owner != dlg && Owner.IsVisible)
+        var owner = preferred ?? Owner;
+        if (owner != null && owner != dlg && owner.IsVisible)
         {
-            dlg.Owner = Owner;
+            dlg.Owner = owner;
+            dlg.WindowStartupLocation = WindowStartupLocation.CenterOwner;
         }
         else
         {
@@ -28,87 +36,86 @@ public static class DialogService
         }
     }
 
-    private static MessageDialog Make(MessageDialog.Kind kind, string title, string message,
-        string initial = "", string okText = "OK", bool showCancel = true, string cancelText = "Cancel")
+    /// <summary>Shows a modal and keeps the dimming scrim in sync with it.</summary>
+    public static bool? ShowModal(Window dlg, Window? owner = null)
     {
-        var dlg = new MessageDialog(kind, title, message, initial, okText, showCancel, cancelText);
-        AttachOwner(dlg);
-        return dlg;
+        AttachOwner(dlg, owner);
+        _openModals++;
+        try { ModalStateChanged?.Invoke(); } catch { }
+        try { return dlg.ShowDialog(); }
+        finally
+        {
+            _openModals = Math.Max(0, _openModals - 1);
+            try { ModalStateChanged?.Invoke(); } catch { }
+        }
     }
 
-    public static bool Confirm(string title, string message, string okText = "Confirm", string cancelText = "Cancel")
+    public static bool Confirm(string title, string message, string? okText = null, string? cancelText = null, bool danger = false)
     {
-        var dlg = Make(MessageDialog.Kind.Confirm, title, message, okText: okText, cancelText: cancelText);
-        return dlg.ShowDialog() == true;
+        var dlg = new MessageDialog(MessageDialog.Kind.Confirm, title, message, "",
+            okText ?? L.T("Common.Confirm"), true, cancelText ?? L.T("Common.Cancel"), danger);
+        return ShowModal(dlg) == true;
     }
 
     public static void Info(string title, string message)
     {
-        var dlg = Make(MessageDialog.Kind.Confirm, title, message, okText: "OK", showCancel: false);
-        dlg.ShowDialog();
+        var dlg = new MessageDialog(MessageDialog.Kind.Confirm, title, message, "", L.T("Common.Ok"), false, "");
+        ShowModal(dlg);
     }
 
-    /// <summary>Shows a prompt with a Download button that opens the given URL when confirmed.</summary>
+    /// <summary>A prompt with a Download button that opens <paramref name="url"/> when confirmed.</summary>
     public static void OfferDownload(string title, string message, string url)
     {
-        var dlg = Make(MessageDialog.Kind.Confirm, title, message, okText: "Download");
-        if (dlg.ShowDialog() == true)
+        var dlg = new MessageDialog(MessageDialog.Kind.Confirm, title, message, "", L.T("Common.Download"), true, L.T("Common.NotNow"));
+        if (ShowModal(dlg) == true) BrowserService.OpenUrl(url);
+    }
+
+    public static string? Prompt(string title, string label, string initial = "", string? okText = null)
+    {
+        var dlg = new MessageDialog(MessageDialog.Kind.Text, title, label, initial, okText ?? L.T("Common.Ok"), true, L.T("Common.Cancel"));
+        return ShowModal(dlg) == true ? dlg.ResultText : null;
+    }
+
+    public static string? PromptMultiline(string title, string label, string initial = "", string? okText = null)
+    {
+        var dlg = new MessageDialog(MessageDialog.Kind.Multiline, title, label, initial, okText ?? L.T("Common.Ok"), true, L.T("Common.Cancel"));
+        return ShowModal(dlg) == true ? dlg.ResultText : null;
+    }
+
+    public static string? PromptPassword(string title, string message, string? okText = null)
+    {
+        var dlg = new MessageDialog(MessageDialog.Kind.Password, title, message, "", okText ?? L.T("Common.Ok"), true, L.T("Common.Cancel"));
+        return ShowModal(dlg) == true ? dlg.ResultText : null;
+    }
+
+    /// <summary>Asks for a new password twice. Null when cancelled or the two entries differ (the user is told).</summary>
+    public static string? PromptNewPassword(string title, string message, int minLength)
+    {
+        var dlg = new MessageDialog(MessageDialog.Kind.NewPassword, title, message, "", L.T("Common.Save"), true, L.T("Common.Cancel"))
         {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
-            catch { }
-        }
+            MinLength = minLength,
+        };
+        return ShowModal(dlg) == true ? dlg.ResultText : null;
     }
 
-    public static string? Prompt(string title, string label, string initial = "")
-    {
-        var dlg = Make(MessageDialog.Kind.Text, title, label, initial);
-        return dlg.ShowDialog() == true ? dlg.ResultText : null;
-    }
-
-    public static string? PromptPassword(string title, string message)
-    {
-        var dlg = Make(MessageDialog.Kind.Password, title, message);
-        return dlg.ShowDialog() == true ? dlg.ResultText : null;
-    }
-
-    /// <summary>
-    /// Shows the Chromium download dialog. Returns true if Chromium is installed afterwards.
-    /// <paramref name="owner"/> matters when this is raised from another modal dialog: without it
-    /// the download window is parented to the main window and can open behind the dialog that
-    /// asked for it, which looks exactly like a freeze.
-    /// </summary>
+    /// <summary>Shows the CloakBrowser download. Returns true when it is installed afterwards.</summary>
     public static bool ShowChromiumDownload(Window? owner = null)
     {
         var dlg = new ChromiumDownloadDialog();
-        if (owner != null && owner != dlg && owner.IsVisible)
-            dlg.Owner = owner;
-        else
-            AttachOwner(dlg);
-        dlg.ShowDialog();
+        ShowModal(dlg, owner);
         return dlg.Installed;
     }
 
-    public static Account? ShowAddAccount(AccountStore store)
+    public static Account? ShowAddAccount(AccountStore store, int startTab = 0)
     {
-        var dlg = new AddAccountDialog(store);
-        AttachOwner(dlg);
-        return dlg.ShowDialog() == true ? dlg.Added : null;
+        var dlg = new AddAccountDialog(store, startTab);
+        return ShowModal(dlg) == true ? dlg.Added : null;
     }
 
     public static string? ShowImport()
-    {
-        var dlg = Make(MessageDialog.Kind.Multiline,
-            "Import accounts",
-            "Paste one or more cookies (any format — one per line or mixed text). Each is validated before it's added.",
-            okText: "Import");
-        return dlg.ShowDialog() == true ? dlg.ResultText : null;
-    }
+        => PromptMultiline(L.T("Import.Title"), L.T("Import.Body"), okText: L.T("Import.Action"));
 
-    /// <summary>
-    /// Native "open file" picker. Returns the chosen path, or <c>null</c> if the
-    /// user cancelled. <paramref name="initialPath"/> (if it exists) pre-selects
-    /// that file so an auto-located source is one click away.
-    /// </summary>
+    /// <summary>Native "open file" picker; null when cancelled.</summary>
     public static string? PickFile(string title, string filter = "All files|*.*", string? initialPath = null)
     {
         var dlg = new Microsoft.Win32.OpenFileDialog
@@ -126,11 +133,7 @@ public static class DialogService
         return dlg.ShowDialog(Owner) == true ? dlg.FileName : null;
     }
 
-    /// <summary>
-    /// Native "save file" picker. Returns the chosen path, or <c>null</c> if the
-    /// user cancelled. The extension the user keeps in the dialog decides the
-    /// export format (see <see cref="ScaleService"/>).
-    /// </summary>
+    /// <summary>Native "save file" picker; null when cancelled.</summary>
     public static string? SaveFile(string title, string filter, string defaultName)
     {
         var dlg = new Microsoft.Win32.SaveFileDialog

@@ -182,8 +182,8 @@ public static class PlaytimeService
             a.PlaytimeTotalText = Format(s.Total);
             a.Playtime7dText = Format(s.Last7Days);
             a.LastPlayedText = s.LastPlayed is { } last
-                ? last.Date == DateTime.Today ? $"today {last:HH:mm}" : last.ToString("d MMM, HH:mm")
-                : "never";
+                ? last.Date == DateTime.Today ? L.T("Time.TodayAt", last.ToString("t")) : last.ToString("g")
+                : L.T("Playtime.NeverPlayed");
             a.HasPlaytime = s.Total > TimeSpan.Zero;
         }
     }
@@ -192,9 +192,9 @@ public static class PlaytimeService
     public static string Format(TimeSpan t)
     {
         if (t <= TimeSpan.Zero) return "—";
-        if (t.TotalHours >= 1) return $"{(int)t.TotalHours}h {t.Minutes}m";
-        if (t.TotalMinutes >= 1) return $"{(int)t.TotalMinutes}m";
-        return "<1m";
+        if (t.TotalHours >= 1) return L.T("Time.HoursMinutes", (int)t.TotalHours, t.Minutes);
+        if (t.TotalMinutes >= 1) return L.T("Time.Minutes", (int)t.TotalMinutes);
+        return L.T("Time.UnderMinute");
     }
 
     // ---- persistence ----

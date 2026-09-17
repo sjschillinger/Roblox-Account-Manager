@@ -1,176 +1,394 @@
 <UserControl x:Class="RobloxAccountManager.Views.DashboardPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:RobloxAccountManager.Controls"
+             xmlns:vm="clr-namespace:RobloxAccountManager.ViewModels"
              xmlns:models="clr-namespace:RobloxAccountManager.Models">
 
-    <Grid Margin="24">
+    <UserControl.Resources>
+        <Style x:Key="StatCell" TargetType="StackPanel">
+            <Setter Property="Margin" Value="20,16,20,16" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="StatLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+        <Style x:Key="StatNote" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+        <Style x:Key="VRule" TargetType="Border">
+            <Setter Property="Width" Value="1" />
+            <Setter Property="Margin" Value="0,16" />
+            <Setter Property="Background" Value="{DynamicResource HairlineBrush}" />
+        </Style>
+        <Style x:Key="PanelHeader" TargetType="Grid">
+            <Setter Property="Margin" Value="18,14,12,10" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="64" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- ============ Header ============ -->
-        <Grid Grid.Row="0">
-            <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="LIVE STATUS" Style="{StaticResource Label}" />
-                <TextBlock Text="Real-time presence across every account"
-                           Foreground="{DynamicResource TextMutedBrush}" FontSize="12" Margin="0,2,0,0" />
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="28,0,150,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,6,0,0">
+                <TextBlock Text="{DynamicResource Str.Overview.Title}" Style="{StaticResource Text.Title}" />
+                <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Text.Caption}" FontSize="13" Margin="14,4,0,0" VerticalAlignment="Center" />
             </StackPanel>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <TextBlock Text="{Binding LastUpdated, StringFormat='Updated {0}'}"
-                           Foreground="{DynamicResource TextMutedBrush}" FontSize="12"
-                           VerticalAlignment="Center" Margin="0,0,12,0" />
-                <Button Content="Refresh now" Command="{Binding RefreshCommand}"
-                        Style="{StaticResource GhostButton}" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,6,0,0">
+                <Button Style="{StaticResource Btn.Secondary}" ctl:Ui.Icon="{StaticResource Icon.ShieldCheck}" Margin="0,0,8,0"
+                        Content="{DynamicResource Str.Overview.CheckSessions}" Command="{Binding ValidateAllCommand}"
+                        ToolTip="{DynamicResource Str.Overview.CheckSessionsTip}" />
+                <Button Style="{StaticResource Btn.Secondary}" ctl:Ui.Icon="{StaticResource Icon.Refresh}"
+                        Content="{DynamicResource Str.Common.Refresh}" Command="{Binding RefreshCommand}" />
             </StackPanel>
         </Grid>
 
-        <!-- ============ Summary counters ============ -->
-        <UniformGrid Grid.Row="1" Rows="1" Columns="5" Margin="0,20,0,0">
-            <Border Style="{StaticResource Card}" Margin="0,0,6,0">
-                <StackPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <Ellipse Width="8" Height="8" Fill="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" Margin="0,0,6,0" />
-                        <TextBlock Text="TOTAL" Style="{StaticResource Label}" />
-                    </StackPanel>
-                    <TextBlock Text="{Binding Total}" FontSize="30" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource Card}" Margin="3,0,3,0">
-                <StackPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <Ellipse Width="8" Height="8" Fill="#3FB950" VerticalAlignment="Center" Margin="0,0,6,0" />
-                        <TextBlock Text="ONLINE" Style="{StaticResource Label}" />
-                    </StackPanel>
-                    <TextBlock Text="{Binding Online}" FontSize="30" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource Card}" Margin="3,0,3,0">
-                <StackPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <Ellipse Width="8" Height="8" Fill="#7B61FF" VerticalAlignment="Center" Margin="0,0,6,0" />
-                        <TextBlock Text="IN GAME" Style="{StaticResource Label}" />
-                    </StackPanel>
-                    <TextBlock Text="{Binding InGame}" FontSize="30" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource Card}" Margin="3,0,3,0">
-                <StackPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <Ellipse Width="8" Height="8" Fill="#E3B341" VerticalAlignment="Center" Margin="0,0,6,0" />
-                        <TextBlock Text="IN STUDIO" Style="{StaticResource Label}" />
-                    </StackPanel>
-                    <TextBlock Text="{Binding InStudio}" FontSize="30" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource Card}" Margin="6,0,0,0">
-                <StackPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <Ellipse Width="8" Height="8" Fill="#63636C" VerticalAlignment="Center" Margin="0,0,6,0" />
-                        <TextBlock Text="OFFLINE" Style="{StaticResource Label}" />
-                    </StackPanel>
-                    <TextBlock Text="{Binding Offline}" FontSize="30" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
-                </StackPanel>
-            </Border>
-        </UniformGrid>
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="28,4,28,26">
 
-        <!-- ============ Economy strip ============ -->
-        <UniformGrid Grid.Row="2" Rows="1" Columns="4" Margin="0,10,0,0">
-            <Border Style="{StaticResource Card}" Margin="0,0,6,0">
-                <StackPanel>
-                    <TextBlock Text="TOTAL ROBUX" Style="{StaticResource Label}" />
-                    <TextBlock Text="{Binding TotalRobux, StringFormat='{}{0:N0}'}" FontSize="24" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource Card}" Margin="3,0,3,0">
-                <StackPanel>
-                    <TextBlock Text="TOTAL RAP" Style="{StaticResource Label}" />
-                    <TextBlock Text="{Binding TotalRap, StringFormat='{}{0:N0}'}" FontSize="24" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource Card}" Margin="3,0,3,0">
-                <StackPanel>
-                    <TextBlock Text="PREMIUM" Style="{StaticResource Label}" />
-                    <TextBlock Text="{Binding PremiumCount}" FontSize="24" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource Card}" Margin="6,0,0,0"
-                    ToolTip="{Binding PlaytimeTotalText, StringFormat='{}{0} recorded in total'}">
-                <StackPanel>
-                    <TextBlock Text="PLAYTIME · 7 DAYS" Style="{StaticResource Label}" />
-                    <TextBlock Text="{Binding PlaytimeWeekText}" FontSize="24" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,0" />
-                </StackPanel>
-            </Border>
-        </UniformGrid>
+                <!-- ===== headline numbers ===== -->
+                <Border Style="{StaticResource Panel}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
 
-        <!-- ============ Per-account live list ============ -->
-        <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,16,0,0" Padding="0">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <ItemsControl ItemsSource="{Binding Accounts}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type models:Account}">
-                            <Border Padding="14,10" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,0,1">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Ellipse Grid.Column="0" Width="10" Height="10" Fill="{Binding PresenceColor}"
-                                             VerticalAlignment="Center" Margin="0,0,12,0" />
-                                    <TextBlock Grid.Column="1"
-                                               Foreground="{DynamicResource TextPrimaryBrush}"
-                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
-                                        <TextBlock.Text>
-                                            <MultiBinding Converter="{StaticResource MaskConverter}">
-                                                <Binding Path="DisplayNameOrUser" />
-                                                <Binding Path="DataContext.MaskUsernames" RelativeSource="{RelativeSource AncestorType=UserControl}" />
-                                            </MultiBinding>
-                                        </TextBlock.Text>
-                                    </TextBlock>
-                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                        <Border Background="#7B61FF" CornerRadius="4" Padding="5,1" Margin="0,0,10,0"
-                                                VerticalAlignment="Center"
-                                                Visibility="{Binding IsPremium, Converter={StaticResource BoolToVis}}">
-                                            <TextBlock Text="PREMIUM" Foreground="White" FontSize="9" FontWeight="Bold" />
-                                        </Border>
-                                        <TextBlock Text="{Binding Playtime7dText, StringFormat='7d {0}'}"
-                                                   Foreground="{DynamicResource TextMutedBrush}" FontSize="12"
-                                                   VerticalAlignment="Center" Margin="0,0,14,0"
-                                                   ToolTip="{Binding LastPlayedText, StringFormat='Last played {0}'}"
-                                                   Visibility="{Binding HasPlaytime, Converter={StaticResource BoolToVis}}" />
-                                        <TextBlock Text="{Binding RobuxDisplay, StringFormat='R$ {0}'}"
-                                                   Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"
-                                                   VerticalAlignment="Center" Margin="0,0,14,0" />
-                                        <TextBlock Text="{Binding RapDisplay, StringFormat='RAP {0}'}"
-                                                   Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"
-                                                   VerticalAlignment="Center" Margin="0,0,14,0" />
-                                        <TextBlock Text="{Binding Presence}" Foreground="{Binding PresenceColor}"
-                                                   VerticalAlignment="Center" FontSize="12" FontWeight="Medium"
-                                                   MinWidth="58" TextAlignment="Right" />
-                                        <Border Margin="6,0,0,0" Padding="4,0" CornerRadius="3" VerticalAlignment="Center"
-                                                Background="{DynamicResource AccentBrush}" ToolTip="{Binding SubPlaceTip}"
-                                                Visibility="{Binding IsSubPlace, Converter={StaticResource BoolToVis}}">
-                                            <TextBlock Text="SUB" FontSize="9" FontWeight="Bold" Foreground="White" />
-                                        </Border>
-                                    </StackPanel>
-                                </Grid>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
-        </Border>
+                        <StackPanel Grid.Column="0" Style="{StaticResource StatCell}">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Style="{StaticResource StatusDot}" Fill="{DynamicResource PresenceOnlineBrush}" Margin="0,0,7,0" />
+                                <TextBlock Text="{DynamicResource Str.Overview.Online}" Style="{StaticResource StatLabel}" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding Online}" Style="{StaticResource Text.Metric}" Margin="0,6,0,0" />
+                            <TextBlock Style="{StaticResource StatNote}" Text="{Binding OnlineNote}" />
+                        </StackPanel>
+                        <Border Grid.Column="1" Style="{StaticResource VRule}" />
+                        <StackPanel Grid.Column="2" Style="{StaticResource StatCell}">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Style="{StaticResource StatusDot}" Fill="{DynamicResource PresenceInGameBrush}" Margin="0,0,7,0" />
+                                <TextBlock Text="{DynamicResource Str.Overview.InGame}" Style="{StaticResource StatLabel}" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding InGame}" Style="{StaticResource Text.Metric}" Margin="0,6,0,0" />
+                            <TextBlock Style="{StaticResource StatNote}" Text="{DynamicResource Str.Overview.InGameNote}" />
+                        </StackPanel>
+                        <Border Grid.Column="3" Style="{StaticResource VRule}" />
+                        <StackPanel Grid.Column="4" Style="{StaticResource StatCell}">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Data="{StaticResource Icon.Monitor}" Style="{StaticResource IconPath}" Width="12" Height="12" Margin="0,0,7,0"
+                                      Stroke="{DynamicResource TextMutedBrush}" />
+                                <TextBlock Text="{DynamicResource Str.Overview.Clients}" Style="{StaticResource StatLabel}" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding Clients.Count}" Style="{StaticResource Text.Metric}" Margin="0,6,0,0" />
+                            <TextBlock Style="{StaticResource StatNote}" Text="{DynamicResource Str.Overview.ClientsNote}" />
+                        </StackPanel>
+                        <Border Grid.Column="5" Style="{StaticResource VRule}" />
+                        <StackPanel Grid.Column="6" Style="{StaticResource StatCell}">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Data="{StaticResource Icon.Robux}" Style="{StaticResource IconPath}" Width="12" Height="12" Margin="0,0,7,0"
+                                      Stroke="{DynamicResource TextMutedBrush}" />
+                                <TextBlock Text="Robux" Style="{StaticResource StatLabel}" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding TotalRobuxText}" Style="{StaticResource Text.Metric}" Margin="0,6,0,0" />
+                            <TextBlock Style="{StaticResource StatNote}" Text="{DynamicResource Str.Overview.RobuxNote}" />
+                        </StackPanel>
+                        <Border Grid.Column="7" Style="{StaticResource VRule}" />
+                        <StackPanel Grid.Column="8" Style="{StaticResource StatCell}">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Data="{StaticResource Icon.Clock}" Style="{StaticResource IconPath}" Width="12" Height="12" Margin="0,0,7,0"
+                                      Stroke="{DynamicResource TextMutedBrush}" />
+                                <TextBlock Text="{DynamicResource Str.Overview.Playtime}" Style="{StaticResource StatLabel}" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding PlaytimeWeekText}" Style="{StaticResource Text.Metric}" Margin="0,6,0,0" />
+                            <TextBlock Style="{StaticResource StatNote}" Text="{Binding PlaytimeTotalText}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- ===== clients + health ===== -->
+                <Grid Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="380" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- running clients -->
+                    <Border Style="{StaticResource Panel}" MinHeight="260">
+                        <DockPanel>
+                            <Grid DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{DynamicResource Str.Clients.Heading}" Style="{StaticResource Text.Heading}" />
+                                    <TextBlock Text="{Binding ClientsTitle}" Style="{StaticResource Text.Caption}" Margin="0,2,0,0" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Style="{StaticResource Btn.Icon}" ctl:Ui.Icon="{StaticResource Icon.Grid}" ToolTip="{DynamicResource Str.Clients.Arrange}"
+                                            Command="{Binding ArrangeCommand}" />
+                                    <Button Style="{StaticResource Btn.Icon}" ctl:Ui.Icon="{StaticResource Icon.Minimize}" ToolTip="{DynamicResource Str.Clients.MinimizeAll}"
+                                            Command="{Binding MinimizeAllCommand}" />
+                                    <Button Style="{StaticResource Btn.Icon}" ctl:Ui.Icon="{StaticResource Icon.Maximize}" ToolTip="{DynamicResource Str.Clients.RestoreAll}"
+                                            Command="{Binding RestoreAllCommand}" />
+                                    <Button Style="{StaticResource Btn.Ghost}" Height="30" Margin="6,0,0,0" Foreground="{DynamicResource DangerBrush}"
+                                            ctl:Ui.Icon="{StaticResource Icon.Stop}" Content="{DynamicResource Str.Clients.CloseAll}"
+                                            Command="{Binding CloseAllCommand}" Visibility="{Binding HasClients, Converter={StaticResource BoolToVis}}" />
+                                </StackPanel>
+                            </Grid>
+                            <Border DockPanel.Dock="Top" Style="{StaticResource Divider}" />
+
+                            <Grid>
+                                <ItemsControl ItemsSource="{Binding Clients}" Margin="6,6,6,8" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:ClientRow}">
+                                            <Border x:Name="bd" CornerRadius="{StaticResource RadiusMd}" Padding="10,8" Background="Transparent">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="42" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="80" />
+                                                        <ColumnDefinition Width="80" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <ctl:AvatarView Width="30" Height="30" CornerRadius="9" HorizontalAlignment="Left"
+                                                                    ImageUrl="{Binding Account.ThumbnailUrl}" NameText="{Binding Name}" />
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
+                                                        <TextBlock Text="{Binding Name}" FontWeight="Medium" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                                        <TextBlock Text="{Binding Detail}" FontSize="12" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextMutedBrush}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                        <TextBlock Text="{DynamicResource Str.Clients.Uptime}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                                                        <TextBlock Text="{Binding Uptime}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                                                        <TextBlock Text="{DynamicResource Str.Clients.Memory}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                                                        <TextBlock Text="{Binding Memory}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <Button Style="{StaticResource Btn.Icon}" Width="30" Height="30" ctl:Ui.Icon="{StaticResource Icon.External}"
+                                                                ToolTip="{DynamicResource Str.Clients.Focus}" IsEnabled="{Binding HasWindow}"
+                                                                Command="{Binding DataContext.FocusClientCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                CommandParameter="{Binding Pid}" />
+                                                        <Button Style="{StaticResource Btn.Icon}" Width="30" Height="30" ctl:Ui.Icon="{StaticResource Icon.Close}"
+                                                                ToolTip="{DynamicResource Str.Clients.Close}"
+                                                                Command="{Binding DataContext.CloseClientCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                CommandParameter="{Binding Pid}" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                            <DataTemplate.Triggers>
+                                                <Trigger SourceName="bd" Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="bd" Property="Background" Value="{DynamicResource HoverOverlayBrush}" />
+                                                </Trigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20,24"
+                                            Visibility="{Binding HasClients, Converter={StaticResource InverseBoolToVis}}">
+                                    <Path Data="{StaticResource Icon.Monitor}" Style="{StaticResource IconPath}" Width="24" Height="24"
+                                          Stroke="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" />
+                                    <TextBlock Text="{DynamicResource Str.Clients.Empty.Title}" Style="{StaticResource Text.Secondary}" HorizontalAlignment="Center" Margin="0,12,0,4" />
+                                    <TextBlock Text="{DynamicResource Str.Clients.Empty.Body}" Style="{StaticResource Text.Caption}" HorizontalAlignment="Center" TextAlignment="Center" MaxWidth="320" />
+                                </StackPanel>
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- needs attention -->
+                    <Border Grid.Column="2" Style="{StaticResource Panel}">
+                        <DockPanel>
+                            <Grid DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{DynamicResource Str.Health.Heading}" Style="{StaticResource Text.Heading}" />
+                                    <TextBlock Text="{DynamicResource Str.Health.Subheading}" Style="{StaticResource Text.Caption}" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Grid>
+                            <Border DockPanel.Dock="Top" Style="{StaticResource Divider}" />
+                            <Grid>
+                                <ItemsControl ItemsSource="{Binding AttentionAccounts}" Margin="6,6,6,8" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type models:Account}">
+                                            <Border x:Name="bd" CornerRadius="{StaticResource RadiusMd}" Padding="10,7" Background="Transparent">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="38" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <ctl:AvatarView Width="28" Height="28" CornerRadius="8" HorizontalAlignment="Left"
+                                                                    ImageUrl="{Binding ThumbnailUrl}" NameText="{Binding Username}" />
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,8,0">
+                                                        <TextBlock FontWeight="Medium" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimaryBrush}">
+                                                            <TextBlock.Text>
+                                                                <MultiBinding Converter="{StaticResource MaskConverter}">
+                                                                    <Binding Path="DisplayNameOrUser" />
+                                                                    <Binding Path="DataContext.MaskUsernames" RelativeSource="{RelativeSource AncestorType=UserControl}" />
+                                                                </MultiBinding>
+                                                            </TextBlock.Text>
+                                                        </TextBlock>
+                                                        <TextBlock x:Name="state" Text="{Binding HealthText}" FontSize="12" Margin="0,1,0,0"
+                                                                   Foreground="{DynamicResource WarningBrush}" TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                    <Button x:Name="fix" Grid.Column="2" Style="{StaticResource Btn.Secondary}" Height="28" Padding="10,0"
+                                                            Content="{DynamicResource Str.Health.Check}"
+                                                            Command="{Binding DataContext.FixAccountCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" />
+                                                </Grid>
+                                            </Border>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding Health}" Value="Invalid">
+                                                    <Setter TargetName="state" Property="Foreground" Value="{DynamicResource DangerBrush}" />
+                                                    <Setter TargetName="fix" Property="Content" Value="{DynamicResource Str.Health.SignIn}" />
+                                                </DataTrigger>
+                                                <Trigger SourceName="bd" Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="bd" Property="Background" Value="{DynamicResource HoverOverlayBrush}" />
+                                                </Trigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20,24" MaxWidth="280"
+                                            Visibility="{Binding AllHealthy, Converter={StaticResource BoolToVis}}">
+                                    <Path Data="{StaticResource Icon.ShieldCheck}" Style="{StaticResource IconPath}" Width="24" Height="24"
+                                          Stroke="{DynamicResource SuccessBrush}" HorizontalAlignment="Center" />
+                                    <TextBlock Text="{DynamicResource Str.Health.AllGood}" Style="{StaticResource Text.Secondary}" HorizontalAlignment="Center" Margin="0,12,0,4" />
+                                    <TextBlock Text="{DynamicResource Str.Health.AllGoodBody}" Style="{StaticResource Text.Caption}" TextAlignment="Center" />
+                                </StackPanel>
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+
+                <!-- ===== online + sessions ===== -->
+                <Grid Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="380" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Style="{StaticResource Panel}" MinHeight="200">
+                        <DockPanel>
+                            <Grid DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
+                                <StackPanel>
+                                    <TextBlock Text="{DynamicResource Str.Overview.OnlineNow}" Style="{StaticResource Text.Heading}" />
+                                    <TextBlock Text="{DynamicResource Str.Overview.OnlineNowSub}" Style="{StaticResource Text.Caption}" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Grid>
+                            <Border DockPanel.Dock="Top" Style="{StaticResource Divider}" />
+                            <Grid>
+                                <ItemsControl ItemsSource="{Binding OnlineAccounts}" Margin="6,6,6,8" Focusable="False">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <UniformGrid Columns="2" VerticalAlignment="Top" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type models:Account}">
+                                            <Button Cursor="Hand" Command="{Binding DataContext.OpenAccountCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}" FocusVisualStyle="{StaticResource FocusRing}">
+                                                <Button.Template>
+                                                    <ControlTemplate TargetType="Button">
+                                                        <Border x:Name="bd" CornerRadius="{StaticResource RadiusMd}" Padding="10,7" Background="Transparent">
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="38" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <ctl:AvatarView Width="28" Height="28" CornerRadius="8" PipSize="9" HorizontalAlignment="Left"
+                                                                                ImageUrl="{Binding ThumbnailUrl}" NameText="{Binding Username}" Presence="{Binding Presence}" />
+                                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                                    <TextBlock FontWeight="Medium" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimaryBrush}">
+                                                                        <TextBlock.Text>
+                                                                            <MultiBinding Converter="{StaticResource MaskConverter}">
+                                                                                <Binding Path="DisplayNameOrUser" />
+                                                                                <Binding Path="DataContext.MaskUsernames" RelativeSource="{RelativeSource AncestorType=UserControl}" />
+                                                                            </MultiBinding>
+                                                                        </TextBlock.Text>
+                                                                    </TextBlock>
+                                                                    <TextBlock Text="{Binding StatusLine}" FontSize="12" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"
+                                                                               Foreground="{DynamicResource TextMutedBrush}" />
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource HoverOverlayBrush}" />
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Button.Template>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="{DynamicResource Str.Overview.NobodyOnline}" Style="{StaticResource Text.Caption}" HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" Margin="20,24"
+                                           Visibility="{Binding OnlineAccounts.Count, Converter={StaticResource CountZeroToVis}}" />
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+
+                    <Border Grid.Column="2" Style="{StaticResource Panel}">
+                        <DockPanel>
+                            <Grid DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
+                                <StackPanel>
+                                    <TextBlock Text="{DynamicResource Str.Overview.Recent}" Style="{StaticResource Text.Heading}" />
+                                    <TextBlock Text="{DynamicResource Str.Overview.RecentSub}" Style="{StaticResource Text.Caption}" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Grid>
+                            <Border DockPanel.Dock="Top" Style="{StaticResource Divider}" />
+                            <Grid>
+                                <ItemsControl ItemsSource="{Binding RecentSessions}" Margin="16,8,16,10" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:SessionRow}">
+                                            <Grid Height="34">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="110" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Duration}" VerticalAlignment="Center" Margin="12,0" FontWeight="Medium"
+                                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                <TextBlock Grid.Column="2" Text="{Binding When}" VerticalAlignment="Center" HorizontalAlignment="Right"
+                                                           FontSize="12" Foreground="{DynamicResource TextMutedBrush}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="{DynamicResource Str.Overview.NoSessions}" Style="{StaticResource Text.Caption}" HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" TextAlignment="Center" Margin="24" MaxWidth="280"
+                                           Visibility="{Binding HasSessions, Converter={StaticResource InverseBoolToVis}}" />
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </UserControl>
