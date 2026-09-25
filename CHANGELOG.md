@@ -15,7 +15,10 @@ into the exe and shown in **What's new**, so a release no longer needs its own n
 
 ---
 
-## Unreleased
+## v2.1.0 — 2026-09-25 (community build)
+
+A community build of the changes proposed upstream in Vaelixx/Roblox-Account-Manager#6. Numbered
+2.1.0 so the updater does not replace it with an older upstream 2.0.x release.
 
 ### Fixed
 
