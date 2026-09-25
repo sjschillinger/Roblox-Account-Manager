@@ -5,7 +5,12 @@ namespace RobloxAccountManager.Services;
 /// <summary>
 /// Polls the process registry for crashed/closed Roblox clients. On exit it notifies
 /// via Discord webhook and, when the account has AutoRejoin on, relaunches it into the
-/// same place/server it was in.
+/// same destination it was launched into — the same private server, the same followed player.
+///
+/// Recovery is bounded at every level: a failed relaunch is retried a couple of times, a public
+/// server that keeps failing is swapped for any server of the same place, and more than
+/// <see cref="MaxRejoins"/> rejoins inside <see cref="RejoinWindow"/> stops auto-rejoin for that
+/// account and says so.
 /// </summary>
 public static class WatchdogService
 {
@@ -20,17 +25,32 @@ public static class WatchdogService
     private static readonly TimeSpan RejoinWindow = TimeSpan.FromMinutes(10);
     private static readonly Dictionary<long, Queue<DateTime>> _rejoins = new();
 
-    /// <summary>Claims one rejoin slot for the account; false when the crash-loop cap is hit.</summary>
-    private static bool TryClaimRejoin(long userId)
+    // Relaunch attempts per rejoin when the launch itself fails (network, Roblox API hiccup).
+    private static readonly TimeSpan[] RetryDelays = { TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(60) };
+
+    private static readonly Dictionary<long, int> _sessionRejoins = new();
+
+    /// <summary>Auto-rejoins for an account since the manager started, for the dashboard.</summary>
+    public static int RejoinsFor(long userId)
+    {
+        lock (_rejoins) return _sessionRejoins.GetValueOrDefault(userId);
+    }
+
+    /// <summary>
+    /// Claims one rejoin slot for the account. Returns how many rejoins (including this one) fall
+    /// inside the window, or 0 when the crash-loop cap is hit.
+    /// </summary>
+    private static int TryClaimRejoin(long userId)
     {
         lock (_rejoins)
         {
             if (!_rejoins.TryGetValue(userId, out var q)) _rejoins[userId] = q = new();
             var cutoff = DateTime.UtcNow - RejoinWindow;
             while (q.Count > 0 && q.Peek() < cutoff) q.Dequeue();
-            if (q.Count >= MaxRejoins) return false;
+            if (q.Count >= MaxRejoins) return 0;
             q.Enqueue(DateTime.UtcNow);
-            return true;
+            _sessionRejoins[userId] = _sessionRejoins.GetValueOrDefault(userId) + 1;
+            return q.Count;
         }
     }
 
@@ -95,9 +115,14 @@ public static class WatchdogService
 
         if (acc == null || !acc.AutoRejoin) return;
 
-        if (!TryClaimRejoin(acc.UserId))
+        // Opened on the Roblox home screen ("open app"), not in a game: there is nothing to rejoin.
+        if (t.Target.Kind == JoinKind.Place && t.Target.PlaceId <= 0) return;
+
+        int claim = TryClaimRejoin(acc.UserId);
+        if (claim == 0)
         {
             // Crash loop: give up instead of relaunching forever.
+            DiagnosticsService.Warn("watchdog", $"Auto-rejoin paused for {t.Alias}: {MaxRejoins} rejoins within {(int)RejoinWindow.TotalMinutes} min");
             int mins = (int)RejoinWindow.TotalMinutes;
             if (s.ToastOnCrash)
                 ToastService.Warning(L.T("Toast.RejoinPaused.Title"),
@@ -110,22 +135,37 @@ public static class WatchdogService
 
         // We treat this exit as a crash and are about to auto-rejoin: tell plugins first.
         try { PluginService.RaiseCrashed(acc, t.PlaceId, t.JobId); } catch { }
-        _ = RejoinAsync(acc, t);
+        _ = RejoinAsync(acc, t, t.Target.ForRejoin(claim));
     }
 
-    private static async Task RejoinAsync(Account acc, ProcessRegistry.Tracked t)
+    private static async Task RejoinAsync(Account acc, ProcessRegistry.Tracked t, JoinTarget target)
     {
         try
         {
             await Task.Delay(3000); // let the crashed process fully die first
-            if (LockService.IsLocked) return;
-            var result = await LauncherService.LaunchAsync(acc, t.PlaceId, t.JobId);
+            DiagnosticsService.Log("watchdog", $"Rejoining {t.Alias} into {target}");
+
+            LauncherService.LaunchResult result;
+            for (int attempt = 0; ; attempt++)
+            {
+                if (LockService.IsLocked) return;
+                // Relaunched by hand (or by a schedule) while we waited to retry: nothing left to recover.
+                if (attempt > 0 && ProcessRegistry.CountFor(acc.UserId) > 0) return;
+                result = await LauncherService.LaunchAsync(acc, target, t.Profile);
+                if (result.Success || !result.Retryable || attempt >= RetryDelays.Length) break;
+                DiagnosticsService.Warn("watchdog", $"Rejoin of {t.Alias} failed, retrying: {result.Message}");
+                await Task.Delay(RetryDelays[attempt]);
+            }
+
+            bool ok = result.Success;
             if (WebhookService.Configured)
             {
-                if (result.Success) WebhookService.Reconnected(acc, t.PlaceId, t.JobId);
-                else WebhookService.ReconnectFailed(t.Alias, acc.ThumbnailUrl, t.PlaceId, result.Message);
+                if (ok) WebhookService.Reconnected(acc, target.PlaceId, target.JobId);
+                else WebhookService.ReconnectFailed(t.Alias, acc.ThumbnailUrl, target.PlaceId, result.Message);
             }
+            if (!ok && SettingsService.Current.ToastOnCrash)
+                ToastService.Warning(L.T("Toast.ClientClosed.Title"), $"{t.Alias}: {result.Message}");
         }
-        catch { }
+        catch (Exception ex) { DiagnosticsService.Warn("watchdog", $"Rejoin of {t.Alias} failed", ex); }
     }
 }

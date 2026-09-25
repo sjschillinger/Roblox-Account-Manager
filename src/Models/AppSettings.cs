@@ -82,6 +82,13 @@ public class AppSettings
     public string AntiAfkKey { get; set; } = "Space";
     public bool AntiAfkRestoreFocus { get; set; } = true;
 
+    /// <summary>
+    /// Pick each client's next interval at random between <see cref="AntiAfkIntervalMinutes"/> and
+    /// <see cref="AntiAfkIntervalMaxMinutes"/>, so several clients don't all get their key press at once.
+    /// </summary>
+    public bool AntiAfkRandomize { get; set; } = false;
+    public int AntiAfkIntervalMaxMinutes { get; set; } = 14;
+
     // ---- Crash watchdog ----
     public bool WatchdogEnabled { get; set; } = false;
     public int WatchdogCheckSeconds { get; set; } = 30;
@@ -107,6 +114,18 @@ public class AppSettings
     public bool PauseVoxelizer { get; set; } = false;
     public bool AltEnterFullscreen { get; set; } = false;
     public Dictionary<string, string> CustomFFlags { get; set; } = new();
+
+    // ---- Performance profiles (see PerformanceProfiles) ----
+    public int AfkProfileFpsCap { get; set; } = 15;
+    public bool AfkProfileMinimize { get; set; } = true;
+
+    /// <summary>What the last profile launch changed in the flag files, so the next normal launch can put it back.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProfileUndoState? ProfileUndo { get; set; }
+
+    /// <summary>Roblox's frame-rate cap from before a profile changed it; null when no profile is in effect.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? FpsCapBeforeProfile { get; set; }
 
     // ---- Proxy (the manager's own Roblox web calls) ----
     public bool EnableProxy { get; set; } = false;
@@ -183,4 +202,11 @@ public class AppSettings
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool UnlockFps { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public int MaxFps { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool FFlagUnlockFps { get; set; }
+}
+
+/// <summary>Flags a performance profile wrote, and per flag file the values they replaced.</summary>
+public class ProfileUndoState
+{
+    public Dictionary<string, string> Written { get; set; } = new();
+    public Dictionary<string, Dictionary<string, string>> Previous { get; set; } = new();
 }

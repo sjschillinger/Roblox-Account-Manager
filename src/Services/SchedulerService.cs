@@ -124,7 +124,12 @@ public static class SchedulerService
             if (!string.IsNullOrWhiteSpace(task.PresetName))
             {
                 var preset = PresetService.Find(task.PresetName);
-                if (preset != null) await PresetService.LaunchAsync(preset);
+                if (preset != null)
+                {
+                    var r = await PresetService.LaunchAsync(preset);
+                    if (r.Error != null || r.Failed > 0)
+                        DiagnosticsService.Warn("scheduler", $"Task '{task.Name}': {r.Launched} launched, {r.Failed} failed{(r.Error != null ? " — " + r.Error : "")}");
+                }
                 else DiagnosticsService.Warn("scheduler", $"Task '{task.Name}': preset '{task.PresetName}' no longer exists");
             }
             else if (!string.IsNullOrWhiteSpace(task.Alias))
