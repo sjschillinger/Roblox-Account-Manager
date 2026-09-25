@@ -402,8 +402,16 @@ public class SettingsViewModel : ObservableObject
         }
     }
 
-    public int AfkProfileFpsCap { get => S.AfkProfileFpsCap; set { S.AfkProfileFpsCap = Math.Clamp(value, 5, 1000); Persist(); OnPropertyChanged(); } }
-    public bool AfkProfileMinimize { get => S.AfkProfileMinimize; set { S.AfkProfileMinimize = value; Persist(); OnPropertyChanged(); } }
+    // Ultra-low AFK profile: every part can be switched off on its own.
+    private UltraLowOptions Afk => S.UltraLowAfk;
+    public int AfkProfileFpsCap { get => Afk.FpsCap; set { Afk.FpsCap = value <= 0 ? 0 : Math.Clamp(value, 5, 1000); Persist(); OnPropertyChanged(); } }
+    public bool AfkProfileMinimize { get => Afk.MinimizeWhenInGame; set { Afk.MinimizeWhenInGame = value; Persist(); OnPropertyChanged(); } }
+    public bool AfkLowestQuality { get => Afk.LowestQuality; set { Afk.LowestQuality = value; Persist(); OnPropertyChanged(); } }
+    public bool AfkNoAntiAliasing { get => Afk.NoAntiAliasing; set { Afk.NoAntiAliasing = value; Persist(); OnPropertyChanged(); } }
+    public bool AfkLowestTextures { get => Afk.LowestTextures; set { Afk.LowestTextures = value; Persist(); OnPropertyChanged(); } }
+    public bool AfkNoGrass { get => Afk.NoGrass; set { Afk.NoGrass = value; Persist(); OnPropertyChanged(); } }
+    public bool AfkGraySky { get => Afk.GraySky; set { Afk.GraySky = value; Persist(); OnPropertyChanged(); } }
+    public bool AfkFreezeLighting { get => Afk.FreezeLighting; set { Afk.FreezeLighting = value; Persist(); OnPropertyChanged(); } }
 
     public string FpsStatus
     {

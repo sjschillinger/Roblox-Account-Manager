@@ -158,6 +158,28 @@
                             </Grid>
                             <Border DockPanel.Dock="Top" Style="{StaticResource Divider}" />
 
+                            <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding PausedRejoins}" Margin="12,8,12,0" Focusable="False"
+                                          Visibility="{Binding HasPausedRejoins, Converter={StaticResource BoolToVis}}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:PausedRejoinRow}">
+                                        <Border CornerRadius="{StaticResource RadiusMd}" Padding="10,6" Margin="0,0,0,6" Background="{DynamicResource HoverOverlayBrush}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Text}" FontSize="12.5" TextWrapping="Wrap" VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                <Button Grid.Column="1" Style="{StaticResource Btn.Ghost}" Height="28" Margin="10,0,0,0"
+                                                        Content="{DynamicResource Str.Watchdog.Resume}"
+                                                        Command="{Binding DataContext.ResumeRejoinCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding UserId}" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
                             <Grid>
                                 <ItemsControl ItemsSource="{Binding Clients}" Margin="6,6,6,8" Focusable="False">
                                     <ItemsControl.ItemTemplate>

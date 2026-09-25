@@ -16,14 +16,14 @@ public static class PresetService
     public static void Init(Func<string, Account?> resolver) => _resolve = resolver;
 
     /// <summary>Outcome of a preset run. <see cref="Error"/> is set when nothing could be launched at all.</summary>
-    public sealed record RunResult(int Launched, int Failed, IReadOnlyList<string> Errors, string? Error = null);
+    public sealed record RunResult(int Launched, int Failed, IReadOnlyList<string> Errors, string? Error = null, int NotStarted = 0);
 
     /// <summary>
     /// Launches every account in the preset. Aliases that don't resolve to a known account count as
     /// failed. The destination is resolved once, before the first launch.
     /// </summary>
     public static async Task<RunResult> LaunchAsync(LaunchPreset preset,
-        Action<Account, int>? onLaunching = null, Action<int>? onWaiting = null)
+        Action<Account, int>? onLaunching = null, Action<int>? onWaiting = null, CancellationToken ct = default)
     {
         if (_resolve == null) return new(0, 0, Array.Empty<string>());
 
@@ -49,10 +49,10 @@ public static class PresetService
 
         var batch = await LauncherService.LaunchBatchAsync(accounts, target.Target,
             new LauncherService.BatchOptions(preset.JoinDelaySeconds, preset.RandomDelaySeconds, preset.PerformanceProfile),
-            onLaunching, onWaiting);
+            onLaunching, onWaiting, ct);
 
         errors.AddRange(batch.Errors);
-        return new(batch.Launched, batch.Failed + (preset.Aliases.Count - accounts.Count), errors);
+        return new(batch.Launched, batch.Failed + (preset.Aliases.Count - accounts.Count), errors, NotStarted: batch.NotStarted);
     }
 
     /// <summary>Finds a preset by name (case-insensitive) in the current settings.</summary>

@@ -33,19 +33,23 @@ into the exe and shown in **What's new**, so a release no longer needs its own n
 - Pasting a game link with a private-server code into a Place ID box no longer turns the code into
   part of the place number.
 - Launch errors no longer echo the launch link, which carries a one-time sign-in ticket.
+- Playtime counts clients while they run (it used to show nothing until a client closed), and
+  sorting accounts by playtime works.
 
 ### Added
 
 - **Join player** and **private server** destinations for presets, with the player looked up while
   you type.
 - **Ultra-low AFK performance profile** per preset: FPS cap (15 by default), lowest graphics,
-  optional minimize after launch. The next launch without it restores your normal settings.
+  optional minimize once the client is in game (Roblox stops loading while minimized). Every part
+  can be switched off in Settings → Graphics. The next launch without it restores your normal settings.
 - **Random Anti-AFK timing.** Each client gets its own schedule, optionally random between two
   intervals, so several clients aren't focused at the same second. The overview shows when each
   client gets its next key press and how often it was rejoined.
 - **Batch launches wait for each client** before starting the next account, plus an optional random
   extra delay per preset. A failed account doesn't stop the rest; the result reads "5 launched,
-  1 failed".
+  1 failed". A **Stop** button ends a running batch before the next account.
+- **Paused auto-rejoin is shown on the overview** with a **Resume** button, instead of only a toast.
 - **Test the browser** under Settings → Browser, **Copy report** under Settings → Diagnostics (with
   cookies, tokens, webhooks and private-server codes removed), and **Minimize** per client.
 - Local API: `/launch` takes `link=` or `followUserId=`; new `/preset?name=`.

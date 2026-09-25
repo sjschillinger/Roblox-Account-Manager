@@ -75,6 +75,7 @@ public class AccountsViewModel : ObservableObject
         RefreshAllCommand = new AsyncRelayCommand(RefreshAllAsync);
 
         LaunchCommand = new AsyncRelayCommand(_ => LaunchAsync());
+        StopLaunchCommand = new RelayCommand(_ => { try { _launchCts?.Cancel(); } catch (ObjectDisposedException) { } });
         ShuffleJoinCommand = new AsyncRelayCommand(_ => ShuffleJoinAsync());
         PingJoinCommand = new AsyncRelayCommand(_ => PingJoinAsync());
         ServerHopCommand = new AsyncRelayCommand(_ => ServerHopAsync());
@@ -436,6 +437,12 @@ public class AccountsViewModel : ObservableObject
 
     private bool _busy;
     public bool Busy { get => _busy; set => SetField(ref _busy, value); }
+
+    // A running batch launch, so it can be stopped between accounts.
+    private CancellationTokenSource? _launchCts;
+    private bool _isLaunching;
+    public bool IsLaunching { get => _isLaunching; private set => SetField(ref _isLaunching, value); }
+    public RelayCommand StopLaunchCommand { get; }
 
     // ================================================================ add / import / export
 
@@ -1039,6 +1046,8 @@ public class AccountsViewModel : ObservableObject
         }
 
         Busy = true;
+        IsLaunching = true;
+        _launchCts = new CancellationTokenSource();
         Account? current = null;
         LauncherService.BatchResult result;
         try
@@ -1058,16 +1067,21 @@ public class AccountsViewModel : ObservableObject
                 {
                     if (current != null) current.IsBusy = false;
                     _main.SetStatus(left > 0 ? L.T("Launch.NextIn", left) : L.T("Launch.WaitingForClient", current?.DisplayNameOrUser ?? ""));
-                });
+                }, _launchCts.Token);
             _store.Save();
         }
         finally
         {
             foreach (var a in accounts) a.IsBusy = false;
+            _launchCts.Dispose();
+            _launchCts = null;
+            IsLaunching = false;
             Busy = false;
         }
 
-        if (result.Errors.Count > 0)
+        if (result.NotStarted > 0)
+            _main.SetStatus(L.T("Launch.Stopped", result.Launched, result.NotStarted));
+        else if (result.Errors.Count > 0)
         {
             _main.SetStatus(result.Launched > 0 ? L.T("Launch.DoneMixed", result.Launched, result.Failed) : result.Errors[0]);
             ToastService.Error(L.T("Launch.FailedTitle"), string.Join("\n", result.Errors.Take(3)));

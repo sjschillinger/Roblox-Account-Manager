@@ -19,24 +19,34 @@ public static class PerformanceProfiles
     public static bool IsKnown(string? id) => Array.IndexOf(All, id ?? "") >= 0;
 
     /// <summary>Flags a profile sets on top of the user's normal FastFlags. Empty for the normal profile.</summary>
-    public static Dictionary<string, string> Flags(string? id)
+    public static Dictionary<string, string> Flags(string? id, UltraLowOptions options)
     {
         var f = new Dictionary<string, string>(StringComparer.Ordinal);
         if (id != UltraLowAfk) return f;
 
-        f["DFIntDebugFRMQualityLevelOverride"] = "1";      // graphics quality 1
-        f["FIntDebugForceMSAASamples"] = "0";              // anti-aliasing off
-        f["DFFlagTextureQualityOverrideEnabled"] = "True";
-        f["DFIntTextureQualityOverride"] = "0";            // lowest textures
-        f["FIntFRMMinGrassDistance"] = "0";                // no grass
-        f["FIntFRMMaxGrassDistance"] = "0";
-        f["FFlagDebugSkyGray"] = "True";                   // gray sky
-        f["DFFlagDebugPauseVoxelizer"] = "True";           // freeze lighting voxel updates
+        if (options.LowestQuality) f["DFIntDebugFRMQualityLevelOverride"] = "1";
+        if (options.NoAntiAliasing) f["FIntDebugForceMSAASamples"] = "0";
+        if (options.LowestTextures)
+        {
+            f["DFFlagTextureQualityOverrideEnabled"] = "True";
+            f["DFIntTextureQualityOverride"] = "0";
+        }
+        if (options.NoGrass)
+        {
+            f["FIntFRMMinGrassDistance"] = "0";
+            f["FIntFRMMaxGrassDistance"] = "0";
+        }
+        if (options.GraySky) f["FFlagDebugSkyGray"] = "True";
+        if (options.FreezeLighting) f["DFFlagDebugPauseVoxelizer"] = "True";   // lighting voxel updates
         return f;
     }
 
     /// <summary>Frame-rate cap the profile wants, or 0 to leave the normal cap in place.</summary>
-    public static int FpsCap(string? id, int afkFpsCap) => id == UltraLowAfk ? Math.Clamp(afkFpsCap, 5, 1000) : 0;
+    public static int FpsCap(string? id, UltraLowOptions options)
+        => id == UltraLowAfk && options.FpsCap > 0 ? Math.Clamp(options.FpsCap, 5, 1000) : 0;
+
+    /// <summary>Whether the profile minimizes its clients once they are in game.</summary>
+    public static bool Minimizes(string? id, UltraLowOptions options) => id == UltraLowAfk && options.MinimizeWhenInGame;
 
     /// <summary>
     /// Undoes what an earlier profile launch left in the shared flag file. For every flag the profile
@@ -60,4 +70,20 @@ public static class PerformanceProfiles
         }
         return edits;
     }
+}
+
+/// <summary>What the Ultra-low AFK profile changes. Every part can be switched off on its own.</summary>
+public sealed class UltraLowOptions
+{
+    public bool LowestQuality { get; set; } = true;
+    public bool NoAntiAliasing { get; set; } = true;
+    public bool LowestTextures { get; set; } = true;
+    public bool NoGrass { get; set; } = true;
+    public bool GraySky { get; set; } = true;
+    public bool FreezeLighting { get; set; } = true;
+
+    /// <summary>Frame-rate cap; 0 leaves the normal cap alone.</summary>
+    public int FpsCap { get; set; } = 15;
+
+    public bool MinimizeWhenInGame { get; set; } = true;
 }

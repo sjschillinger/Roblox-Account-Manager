@@ -125,7 +125,8 @@ public static class SettingsService
 
         s.AntiAfkIntervalMinutes = Math.Clamp(s.AntiAfkIntervalMinutes, 1, 120);
         s.AntiAfkIntervalMaxMinutes = Math.Clamp(s.AntiAfkIntervalMaxMinutes, s.AntiAfkIntervalMinutes, 120);
-        s.AfkProfileFpsCap = Math.Clamp(s.AfkProfileFpsCap, 5, 1000);
+        s.UltraLowAfk ??= new();
+        s.UltraLowAfk.FpsCap = s.UltraLowAfk.FpsCap <= 0 ? 0 : Math.Clamp(s.UltraLowAfk.FpsCap, 5, 1000);
 
         bool upgraded = false;
         s.LaunchPresets.RemoveAll(p => p == null);

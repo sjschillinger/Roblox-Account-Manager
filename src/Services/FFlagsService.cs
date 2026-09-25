@@ -56,7 +56,7 @@ public static class FFlagsService
         ApplyFramerate(s, profile);
 
         var flags = s.ApplyFFlags ? BuildFlags(s) : new Dictionary<string, string>(StringComparer.Ordinal);
-        var profileFlags = PerformanceProfiles.Flags(profile);
+        var profileFlags = PerformanceProfiles.Flags(profile, s.UltraLowAfk);
         foreach (var kv in profileFlags)
             flags[kv.Key] = kv.Value;
         foreach (var kv in ParseRaw(account?.FFlags))
@@ -102,20 +102,22 @@ public static class FFlagsService
     {
         try
         {
-            int profileFps = PerformanceProfiles.FpsCap(profile, s.AfkProfileFpsCap);
+            int profileFps = PerformanceProfiles.FpsCap(profile, s.UltraLowAfk);
             if (profileFps > 0)
             {
                 s.FpsCapBeforeProfile ??= RobloxClientSettingsService.ReadFramerateCap() ?? 0;
                 RobloxClientSettingsService.WriteFramerateCap(profileFps);
+                s.FpsCapWrittenByProfile = profileFps;
                 return;
             }
 
             if (s.FpsCap > 0)
                 RobloxClientSettingsService.WriteFramerateCap(s.FpsCap);
             else if (s.FpsCapBeforeProfile is int before && before != 0
-                     && RobloxClientSettingsService.ReadFramerateCap() == PerformanceProfiles.FpsCap(PerformanceProfiles.UltraLowAfk, s.AfkProfileFpsCap))
+                     && RobloxClientSettingsService.ReadFramerateCap() == s.FpsCapWrittenByProfile)
                 RobloxClientSettingsService.WriteFramerateCap(before);   // unless the user changed it in game since
             s.FpsCapBeforeProfile = null;
+            s.FpsCapWrittenByProfile = null;
         }
         catch (Exception ex) { DiagnosticsService.Warn("fflags", "Could not apply the frame-rate cap", ex); }
     }

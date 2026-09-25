@@ -119,7 +119,12 @@
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
                                 <Button Style="{StaticResource Btn.Primary}" ctl:Ui.Icon="{StaticResource Icon.Play}" Height="38"
                                         Content="{DynamicResource Str.Automation.RunNow}"
-                                        Command="{Binding DataContext.RunPresetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
+                                        Command="{Binding DataContext.RunPresetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
+                                        Visibility="{Binding DataContext.IsPresetRunning, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource InverseBoolToVis}}" />
+                                <Button Style="{StaticResource Btn.Secondary}" ctl:Ui.Icon="{StaticResource Icon.Stop}" Height="38" Foreground="{DynamicResource DangerBrush}"
+                                        Content="{DynamicResource Str.Launch.Stop}" ToolTip="{DynamicResource Str.Launch.Stop.Tip}"
+                                        Command="{Binding DataContext.StopPresetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        Visibility="{Binding DataContext.IsPresetRunning, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}" />
                                 <Button Style="{StaticResource Btn.Icon}" Width="38" Height="38" Margin="6,0,0,0" ctl:Ui.Icon="{StaticResource Icon.Trash}"
                                         ToolTip="{DynamicResource Str.Common.Delete}"
                                         Command="{Binding DataContext.DeletePresetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />

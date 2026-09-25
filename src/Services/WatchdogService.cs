@@ -30,6 +30,26 @@ public static class WatchdogService
 
     private static readonly Dictionary<long, int> _sessionRejoins = new();
 
+    /// <summary>
+    /// Accounts whose auto-rejoin is paused right now because they hit the crash-loop cap. The pause
+    /// lifts by itself once the oldest rejoin leaves the window, or at once through <see cref="Resume"/>.
+    /// </summary>
+    public static IReadOnlyList<long> PausedAccounts()
+    {
+        lock (_rejoins)
+        {
+            var cutoff = DateTime.UtcNow - RejoinWindow;
+            return _rejoins.Where(kv => kv.Value.Count(t => t >= cutoff) >= MaxRejoins).Select(kv => kv.Key).ToList();
+        }
+    }
+
+    /// <summary>Lifts the crash-loop pause for an account (the user checked the game and wants rejoins back).</summary>
+    public static void Resume(long userId)
+    {
+        lock (_rejoins) _rejoins.Remove(userId);
+        DiagnosticsService.Log("watchdog", $"Auto-rejoin resumed for user {userId}");
+    }
+
     /// <summary>Auto-rejoins for an account since the manager started, for the dashboard.</summary>
     public static int RejoinsFor(long userId)
     {

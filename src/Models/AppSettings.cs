@@ -116,8 +116,7 @@ public class AppSettings
     public Dictionary<string, string> CustomFFlags { get; set; } = new();
 
     // ---- Performance profiles (see PerformanceProfiles) ----
-    public int AfkProfileFpsCap { get; set; } = 15;
-    public bool AfkProfileMinimize { get; set; } = true;
+    public UltraLowOptions UltraLowAfk { get; set; } = new();
 
     /// <summary>What the last profile launch changed in the flag files, so the next normal launch can put it back.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -126,6 +125,10 @@ public class AppSettings
     /// <summary>Roblox's frame-rate cap from before a profile changed it; null when no profile is in effect.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? FpsCapBeforeProfile { get; set; }
+
+    /// <summary>The cap the profile wrote, so it is only put back while the file still holds it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? FpsCapWrittenByProfile { get; set; }
 
     // ---- Proxy (the manager's own Roblox web calls) ----
     public bool EnableProxy { get; set; } = false;

@@ -174,7 +174,10 @@ public static class LauncherService
                 try { await PresenceService.PollNowAsync(); } catch { }
             });
 
-            var client = Task.Run(() => AttributeClientAsync(acc, target, profile, launchedAt));
+            // What presence said before this launch: a stale "in game" from the previous session must
+            // not count as this client having loaded (see MinimizeWhenInGameAsync).
+            string? gameBefore = acc.Presence == PresenceStatus.InGame ? acc.GameId ?? "" : null;
+            var client = Task.Run(() => AttributeClientAsync(acc, target, profile, launchedAt, gameBefore));
 
             try { PluginService.RaiseLaunched(acc, target.PlaceId, jobId); } catch { }
             if (settings.ToastOnLaunch)
@@ -195,7 +198,8 @@ public static class LauncherService
     /// a pending Roblox update, a slow disk) the client can take far longer than a few seconds to
     /// exist, and a single miss meant no Anti-AFK, crash watchdog or RAM cap for it.
     /// </summary>
-    private static async Task<int> AttributeClientAsync(Account acc, JoinTarget target, string? profile, DateTime launchedAt)
+    private static async Task<int> AttributeClientAsync(Account acc, JoinTarget target, string? profile, DateTime launchedAt,
+        string? gameBefore = null)
     {
         await Task.Delay(4000);
 
@@ -209,27 +213,50 @@ public static class LauncherService
         if (pid != 0)
         {
             _lastProcess[acc.UserId] = pid;
-            if (profile == PerformanceProfiles.UltraLowAfk && SettingsService.Current.AfkProfileMinimize)
-                _ = MinimizeWhenReadyAsync(pid);
+            if (PerformanceProfiles.Minimizes(profile, SettingsService.Current.UltraLowAfk))
+                _ = MinimizeWhenInGameAsync(acc, pid, gameBefore);
         }
         else DiagnosticsService.Warn("launcher", $"No client could be attributed to {acc.DisplayNameOrUser} within 34s of launch");
         return pid;
     }
 
-    /// <summary>Minimizes a freshly launched client once it has a window (the splash screen has none).</summary>
-    private static async Task MinimizeWhenReadyAsync(int pid)
+    /// <summary>
+    /// Minimizes a freshly launched client once it has joined its game. Roblox stops loading while
+    /// its window is minimized, so minimizing on the splash screen left the client stuck until someone
+    /// restored it. "Joined" is the account's presence turning In Game — a fresh value, not one left
+    /// over from the session before — plus a short settle. Without that signal (presence switched
+    /// off, or never reported within 5 minutes) the client is left as it is.
+    /// </summary>
+    /// <param name="gameBefore">Game id presence reported before the launch when it already said In Game; null otherwise.</param>
+    private static async Task MinimizeWhenInGameAsync(Account acc, int pid, string? gameBefore)
     {
-        for (int i = 0; i < 60; i++)
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(5);
+        DateTime? windowSince = null;
+        while (DateTime.UtcNow < deadline)
         {
-            if (InstanceControlService.Minimize(pid)) return;
-            await Task.Delay(1000);
+            await Task.Delay(3000);
+            if (!ProcessRegistry.All.Any(t => t.Pid == pid)) return;          // closed meanwhile
+            if (ProcessRegistry.WindowHandle(pid) == IntPtr.Zero) continue;   // still starting
+            windowSince ??= DateTime.UtcNow;
+
+            if (acc.Presence != PresenceStatus.InGame) continue;
+            // In game already before the launch and still the same server: presence may simply not
+            // have caught up. Give loading a generous minute and a half instead of trusting it.
+            bool fresh = gameBefore == null || (acc.GameId ?? "") != gameBefore;
+            var settle = fresh ? TimeSpan.FromSeconds(15) : TimeSpan.FromSeconds(90);
+            if (DateTime.UtcNow - windowSince.Value < settle) continue;
+
+            InstanceControlService.Minimize(pid);
+            return;
         }
+        DiagnosticsService.Log("launcher", $"Left {acc.DisplayNameOrUser}'s client open: it never showed as in game (minimizing earlier stops Roblox loading)");
     }
 
     /// <summary>Options for <see cref="LaunchBatchAsync"/>.</summary>
     public sealed record BatchOptions(int DelaySeconds, int RandomDelaySeconds = 0, string? Profile = null);
 
-    public sealed record BatchResult(int Launched, int Failed, IReadOnlyList<string> Errors);
+    /// <param name="NotStarted">Accounts skipped because the batch was stopped.</param>
+    public sealed record BatchResult(int Launched, int Failed, IReadOnlyList<string> Errors, int NotStarted = 0);
 
     /// <summary>
     /// Launches accounts one after another into the same target. Before the next account starts, the
@@ -241,16 +268,17 @@ public static class LauncherService
     /// </summary>
     /// <param name="onLaunching">Account about to launch and its index (UI status).</param>
     /// <param name="onWaiting">Seconds left before the next launch; -1 while only waiting for the client.</param>
+    /// <param name="ct">Stops the batch between accounts. Clients already launched keep running.</param>
     public static async Task<BatchResult> LaunchBatchAsync(IReadOnlyList<Account> accounts, JoinTarget target, BatchOptions options,
         Action<Account, int>? onLaunching = null, Action<int>? onWaiting = null, CancellationToken ct = default)
     {
-        int launched = 0;
+        int launched = 0, attempted = 0;
         var errors = new List<string>();
 
-        for (int i = 0; i < accounts.Count; i++)
+        for (int i = 0; i < accounts.Count && !ct.IsCancellationRequested; i++)
         {
-            ct.ThrowIfCancellationRequested();
             var acc = accounts[i];
+            attempted++;
             onLaunching?.Invoke(acc, i);
 
             LaunchResult r;
@@ -269,19 +297,23 @@ public static class LauncherService
             if (options.RandomDelaySeconds > 0) delay += Random.Shared.Next(options.RandomDelaySeconds + 1);
 
             var waitForClient = r.Success ? r.Client : Task.FromResult(0);
-            for (int left = delay; left > 0; left--)
+            try
             {
-                onWaiting?.Invoke(left);
-                await Task.Delay(1000, ct);
+                for (int left = delay; left > 0; left--)
+                {
+                    onWaiting?.Invoke(left);
+                    await Task.Delay(1000, ct);
+                }
+                if (!waitForClient.IsCompleted)
+                {
+                    onWaiting?.Invoke(-1);
+                    await waitForClient.WaitAsync(ct);
+                }
             }
-            if (!waitForClient.IsCompleted)
-            {
-                onWaiting?.Invoke(-1);
-                await waitForClient.WaitAsync(ct);
-            }
+            catch (OperationCanceledException) { break; }
         }
 
-        return new BatchResult(launched, accounts.Count - launched, errors);
+        return new BatchResult(launched, attempted - launched, errors, accounts.Count - attempted);
     }
 
     /// <summary>

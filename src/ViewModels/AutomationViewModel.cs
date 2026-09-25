@@ -470,6 +470,7 @@ public class AutomationViewModel : ObservableObject
         AddPresetCommand = new RelayCommand(_ => AddPreset());
         DeletePresetCommand = new RelayCommand(p => DeletePreset(p as PresetItem ?? SelectedPreset));
         RunPresetCommand = new AsyncRelayCommand(p => RunPresetAsync(p as PresetItem ?? SelectedPreset));
+        StopPresetCommand = new RelayCommand(_ => { try { _presetCts?.Cancel(); } catch (ObjectDisposedException) { } });
         AddScheduleCommand = new RelayCommand(_ => AddSchedule());
         DeleteScheduleCommand = new RelayCommand(p => DeleteSchedule(p as ScheduleItem ?? SelectedSchedule));
         RunScheduleNowCommand = new AsyncRelayCommand(p => RunScheduleAsync(p as ScheduleItem ?? SelectedSchedule));
@@ -521,6 +522,7 @@ public class AutomationViewModel : ObservableObject
     public RelayCommand AddPresetCommand { get; }
     public RelayCommand DeletePresetCommand { get; }
     public AsyncRelayCommand RunPresetCommand { get; }
+    public RelayCommand StopPresetCommand { get; }
     public RelayCommand AddScheduleCommand { get; }
     public RelayCommand DeleteScheduleCommand { get; }
     public AsyncRelayCommand RunScheduleNowCommand { get; }
@@ -577,7 +579,9 @@ public class AutomationViewModel : ObservableObject
         OnPropertyChanged(nameof(PresetNames));
     }
 
+    private CancellationTokenSource? _presetCts;
     private bool _presetRunning;
+    public bool IsPresetRunning { get => _presetRunning; private set => SetField(ref _presetRunning, value); }
 
     private async Task RunPresetAsync(PresetItem? item)
     {
@@ -591,17 +595,29 @@ public class AutomationViewModel : ObservableObject
             return;
         }
 
-        _presetRunning = true;
+        IsPresetRunning = true;
+        _presetCts = new CancellationTokenSource();
         _main.SetStatus(L.T("Automation.Preset.Running", item.Name));
         PresetService.RunResult r;
         try
         {
             r = await PresetService.LaunchAsync(item.Model,
                 onLaunching: (a, i) => _main.SetStatus(L.T("Launch.LaunchingOf", a.DisplayNameOrUser, i + 1, item.Model.Aliases.Count)),
-                onWaiting: left => _main.SetStatus(left > 0 ? L.T("Launch.NextIn", left) : L.T("Automation.Preset.Running", item.Name)));
+                onWaiting: left => _main.SetStatus(left > 0 ? L.T("Launch.NextIn", left) : L.T("Automation.Preset.Running", item.Name)),
+                ct: _presetCts.Token);
         }
-        finally { _presetRunning = false; }
+        finally
+        {
+            _presetCts.Dispose();
+            _presetCts = null;
+            IsPresetRunning = false;
+        }
 
+        if (r.NotStarted > 0)
+        {
+            _main.SetStatus(L.T("Launch.Stopped", r.Launched, r.NotStarted));
+            return;
+        }
         if (r.Error != null)
         {
             _main.SetStatus(r.Error);
