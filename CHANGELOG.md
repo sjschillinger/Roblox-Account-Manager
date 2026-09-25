@@ -49,7 +49,13 @@ into the exe and shown in **What's new**, so a release no longer needs its own n
 - **Batch launches wait for each client** before starting the next account, plus an optional random
   extra delay per preset. A failed account doesn't stop the rest; the result reads "5 launched,
   1 failed". A **Stop** button ends a running batch before the next account.
-- **Paused auto-rejoin is shown on the overview** with a **Resume** button, instead of only a toast.
+- **Auto-rejoin no longer gives up.** It used to stop after 3 rejoins within 10 minutes. Now the
+  first rejoins in a row are immediate and later ones wait longer (2, 5, 10, then 15 minutes), for
+  as long as rejoin is on. A waiting rejoin is shown on the overview with a **Stop** button, and a
+  client that ran for 10 minutes resets the count.
+- If the `data` folder next to the exe can't be written to and the manager falls back to the
+  per-user folder, its contents are copied over first (checked, never overwriting anything), so
+  accounts don't seem to vanish. The old folder is left untouched.
 - **Saved places remember their server.** The launch bar's bookmark saves the Job ID or
   private-server / share link with the place (encrypted), and presets can use a saved place, so a
   link is pasted once and several presets can share it. The launch bar also keeps its last server

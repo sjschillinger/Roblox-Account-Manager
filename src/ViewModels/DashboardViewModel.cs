@@ -8,8 +8,8 @@ using RobloxAccountManager.Services;
 namespace RobloxAccountManager.ViewModels;
 
 /// <summary>A running Roblox client as shown on the Overview.</summary>
-/// <summary>An account whose auto-rejoin is paused after repeated crashes.</summary>
-public sealed class PausedRejoinRow
+/// <summary>An account whose next auto-rejoin is waiting out a backoff delay after repeated crashes.</summary>
+public sealed class WaitingRejoinRow
 {
     public long UserId { get; init; }
     public string Text { get; init; } = "";
@@ -61,7 +61,7 @@ public class DashboardViewModel : ObservableObject
         FocusClientCommand = new RelayCommand(p => { if (p is int pid && !InstanceControlService.Focus(pid)) _main.SetStatus(L.T("Clients.NoWindow")); });
         CloseClientCommand = new RelayCommand(p => { if (p is int pid) _ = Task.Run(() => { InstanceControlService.Close(pid); }); });
         MinimizeClientCommand = new RelayCommand(p => { if (p is int pid && !InstanceControlService.Minimize(pid)) _main.SetStatus(L.T("Clients.NoWindow")); });
-        ResumeRejoinCommand = new RelayCommand(p => { if (p is long id) { WatchdogService.Resume(id); RefreshClients(); } });
+        CancelRejoinCommand = new RelayCommand(p => { if (p is long id) { WatchdogService.CancelRejoin(id); RefreshClients(); } });
         OpenAccountCommand = new RelayCommand(p => { if (p is Account a) _main.ShowAccount(a); });
         FixAccountCommand = new AsyncRelayCommand(p => FixAsync(p as Account));
 
@@ -215,9 +215,9 @@ public class DashboardViewModel : ObservableObject
 
     public ObservableCollection<ClientRow> Clients { get; } = new();
 
-    /// <summary>Accounts the watchdog stopped rejoining (crash-loop cap), with a Resume action — a toast alone is easy to miss.</summary>
-    public ObservableCollection<PausedRejoinRow> PausedRejoins { get; } = new();
-    public bool HasPausedRejoins => PausedRejoins.Count > 0;
+    /// <summary>Rejoins waiting out a backoff delay, with a Stop action — a toast alone is easy to miss.</summary>
+    public ObservableCollection<WaitingRejoinRow> WaitingRejoins { get; } = new();
+    public bool HasWaitingRejoins => WaitingRejoins.Count > 0;
     public bool HasClients => Clients.Count > 0;
 
     public void RefreshClients()
@@ -258,14 +258,15 @@ public class DashboardViewModel : ObservableObject
         OnPropertyChanged(nameof(HasClients));
         OnPropertyChanged(nameof(ClientsTitle));
 
-        PausedRejoins.Clear();
-        foreach (long id in WatchdogService.PausedAccounts())
+        WaitingRejoins.Clear();
+        foreach (var (id, due) in WatchdogService.PendingRejoins())
         {
             byId.TryGetValue(id, out var acc);
             string who = MaskUsernames ? "••••••" : acc?.DisplayNameOrUser ?? id.ToString();
-            PausedRejoins.Add(new PausedRejoinRow { UserId = id, Text = L.T("Watchdog.PausedFor", who) });
+            int mins = Math.Max(1, (int)Math.Ceiling((due - DateTime.UtcNow).TotalMinutes));
+            WaitingRejoins.Add(new WaitingRejoinRow { UserId = id, Text = L.T("Watchdog.Waiting", who, mins) });
         }
-        OnPropertyChanged(nameof(HasPausedRejoins));
+        OnPropertyChanged(nameof(HasWaitingRejoins));
     }
 
     public string ClientsTitle => L.N("Clients.Title", Clients.Count);
@@ -289,7 +290,7 @@ public class DashboardViewModel : ObservableObject
     public RelayCommand FocusClientCommand { get; }
     public RelayCommand CloseClientCommand { get; }
     public RelayCommand MinimizeClientCommand { get; }
-    public RelayCommand ResumeRejoinCommand { get; }
+    public RelayCommand CancelRejoinCommand { get; }
     public RelayCommand OpenAccountCommand { get; }
     public AsyncRelayCommand FixAccountCommand { get; }
 

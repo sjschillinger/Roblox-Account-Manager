@@ -232,9 +232,13 @@ public static class Paths
         catch
         {
             IsPortable = false;
-            return System.IO.Path.Combine(
+            string perUser = System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "RobloxAccountManager", "data");
+            // A data folder next to the exe that can't be written to: bring its contents along
+            // instead of starting empty (see DataFolderMigration — nothing is deleted).
+            DataFolderMigration.CopyIfNeeded(local, perUser);
+            return perUser;
         }
     }
 }
