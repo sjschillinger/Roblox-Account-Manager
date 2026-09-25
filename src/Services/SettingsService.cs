@@ -123,12 +123,23 @@ public static class SettingsService
         s.ScheduledTasks ??= new();
         s.Hotkeys ??= new();
 
+        s.DisconnectMinutes = Math.Clamp(s.DisconnectMinutes, 2, 60);
+        s.RestartClientsMinutes = Math.Clamp(s.RestartClientsMinutes, 30, 24 * 60);
         s.AntiAfkIntervalMinutes = Math.Clamp(s.AntiAfkIntervalMinutes, 1, 120);
         s.AntiAfkIntervalMaxMinutes = Math.Clamp(s.AntiAfkIntervalMaxMinutes, s.AntiAfkIntervalMinutes, 120);
         s.UltraLowAfk ??= new();
         s.UltraLowAfk.FpsCap = s.UltraLowAfk.FpsCap <= 0 ? 0 : Math.Clamp(s.UltraLowAfk.FpsCap, 5, 1000);
 
         bool upgraded = false;
+        s.LastServerInput ??= "";
+        s.LastFollowInput ??= "";
+        s.SavedPlaces.RemoveAll(p => p == null);
+        foreach (var place in s.SavedPlaces)
+        {
+            place.Server ??= "";
+            if (string.IsNullOrEmpty(place.Id)) { place.Id = Guid.NewGuid().ToString("N"); upgraded = true; }
+        }
+
         s.LaunchPresets.RemoveAll(p => p == null);
         foreach (var p in s.LaunchPresets)
         {
@@ -136,6 +147,7 @@ public static class SettingsService
             p.JobId ??= "";
             p.PrivateServerLink ??= "";
             p.FollowUsername ??= "";
+            p.SavedPlaceId ??= "";
             p.JoinDelaySeconds = Math.Clamp(p.JoinDelaySeconds, 0, 600);
             p.RandomDelaySeconds = Math.Clamp(p.RandomDelaySeconds, 0, 600);
             if (!PerformanceProfiles.IsKnown(p.PerformanceProfile)) p.PerformanceProfile = PerformanceProfiles.Normal;

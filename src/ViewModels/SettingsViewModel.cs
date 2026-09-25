@@ -541,6 +541,10 @@ public class SettingsViewModel : ObservableObject
 
     public bool WatchdogEnabled { get => S.WatchdogEnabled; set { S.WatchdogEnabled = value; Persist(); WatchdogService.Apply(); OnPropertyChanged(); } }
     public int WatchdogCheckSeconds { get => S.WatchdogCheckSeconds; set { S.WatchdogCheckSeconds = Math.Clamp(value, 5, 600); Persist(); WatchdogService.Apply(); OnPropertyChanged(); } }
+    public bool RejoinOnDisconnect { get => S.RejoinOnDisconnect; set { S.RejoinOnDisconnect = value; Persist(); OnPropertyChanged(); } }
+    public int DisconnectMinutes { get => S.DisconnectMinutes; set { S.DisconnectMinutes = Math.Clamp(value, 2, 60); Persist(); OnPropertyChanged(); } }
+    public bool RestartClientsEnabled { get => S.RestartClientsEnabled; set { S.RestartClientsEnabled = value; Persist(); WatchdogService.Apply(); OnPropertyChanged(); } }
+    public int RestartClientsMinutes { get => S.RestartClientsMinutes; set { S.RestartClientsMinutes = Math.Clamp(value, 30, 24 * 60); Persist(); OnPropertyChanged(); } }
 
     public bool RamMonitorEnabled { get => S.RamMonitorEnabled; set { S.RamMonitorEnabled = value; Persist(); RamMonitorService.Apply(); OnPropertyChanged(); OnPropertyChanged(nameof(RamStatus)); } }
     public int RamMonitorSeconds { get => S.RamMonitorSeconds; set { S.RamMonitorSeconds = Math.Clamp(value, 2, 600); Persist(); RamMonitorService.Apply(); OnPropertyChanged(); } }
@@ -1058,6 +1062,9 @@ public class SettingsViewModel : ObservableObject
 
     private bool _healthRunning;
     public bool HealthRunning { get => _healthRunning; private set => SetField(ref _healthRunning, value); }
+
+    /// <summary>The manager's own memory use, refreshed whenever Settings opens.</summary>
+    public string ManagerFootprint => DiagnosticsService.ManagerFootprint();
 
     public string DiagnosticsStatus
     {

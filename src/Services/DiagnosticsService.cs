@@ -173,6 +173,25 @@ public static class DiagnosticsService
     }
 
     /// <summary>
+    /// The manager's own footprint: working set, private memory, managed heap, handles, threads.
+    /// Shown in Settings → Diagnostics and in the report, so a slow leak shows up as a number that
+    /// keeps growing over a long session rather than as a vague "the PC got slow".
+    /// </summary>
+    public static string ManagerFootprint()
+    {
+        try
+        {
+            using var me = System.Diagnostics.Process.GetCurrentProcess();
+            const double Mb = 1024d * 1024d;
+            return string.Format(CultureInfo.InvariantCulture,
+                "{0:0} MB in RAM, {1:0} MB private, {2:0} MB managed heap, {3} handles, {4} threads, up {5:%d}d {5:hh}h {5:mm}m",
+                me.WorkingSet64 / Mb, me.PrivateMemorySize64 / Mb, GC.GetTotalMemory(false) / Mb,
+                me.HandleCount, me.Threads.Count, DateTime.Now - me.StartTime);
+        }
+        catch { return "unknown"; }
+    }
+
+    /// <summary>
     /// A plain-text report to paste into a GitHub issue: versions, environment, which features are
     /// switched on, and the recent log. Built from settings flags and counts only — never account
     /// data — and run through <see cref="Redaction"/> as a whole. Account names that appear in log
@@ -192,8 +211,9 @@ public static class DiagnosticsService
             sb.AppendLine($"Browser: {Safe(() => BrowserService.Resolve()?.Engine) ?? "none found"} (setting: {s.BrowserEngine})");
             sb.AppendLine($"Multi-instance: {s.EnableMultiInstance}, close singleton event: {s.CloseSingletonEvent}, mutex held: {RobloxSingletonService.MutexHeld}, access denied: {RobloxSingletonService.AccessDenied}");
             sb.AppendLine($"Tracked clients: {InstanceControlService.Count}");
+            sb.AppendLine($"Manager: {ManagerFootprint()}");
             sb.AppendLine($"Anti-AFK: {s.AntiAfkEnabled} ({s.AntiAfkIntervalMinutes}{(s.AntiAfkRandomize ? $"-{s.AntiAfkIntervalMaxMinutes}" : "")} min, key {s.AntiAfkKey})");
-            sb.AppendLine($"Watchdog: {s.WatchdogEnabled}; RAM monitor: {s.RamMonitorEnabled} (force-close: {s.AutoCloseOnHighRam} at {s.RamLimitMb} MB, auto-trim: {s.AutoTrimEnabled})");
+            sb.AppendLine($"Watchdog: {s.WatchdogEnabled} (disconnects: {s.RejoinOnDisconnect} after {s.DisconnectMinutes} min, timed restart: {s.RestartClientsEnabled} every {s.RestartClientsMinutes} min); RAM monitor: {s.RamMonitorEnabled} (force-close: {s.AutoCloseOnHighRam} at {s.RamLimitMb} MB, auto-trim: {s.AutoTrimEnabled})");
             sb.AppendLine($"FastFlags: {s.ApplyFFlags} ({s.CustomFFlags.Count} custom), FPS cap: {s.FpsCap}, AFK profile FPS: {s.UltraLowAfk.FpsCap}, profile in effect: {s.ProfileUndo != null}");
             sb.AppendLine($"Local API: {s.WebApiEnabled}, plugins: {s.EnablePlugins}, proxy: {s.EnableProxy}, webhook: {!string.IsNullOrEmpty(s.DiscordWebhookUrl)}");
             sb.AppendLine($"Presets: {s.LaunchPresets.Count} ({string.Join(", ", s.LaunchPresets.GroupBy(p => p.Destination).Select(g => $"{g.Key} {g.Count()}"))}), schedules: {s.ScheduledTasks.Count}");

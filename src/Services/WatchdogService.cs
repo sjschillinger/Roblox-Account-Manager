@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using RobloxAccountManager.Models;
 
 namespace RobloxAccountManager.Services;
@@ -11,6 +12,10 @@ namespace RobloxAccountManager.Services;
 /// server that keeps failing is swapped for any server of the same place, and more than
 /// <see cref="MaxRejoins"/> rejoins inside <see cref="RejoinWindow"/> stops auto-rejoin for that
 /// account and says so.
+///
+/// Two optional extras run through the same rejoin path: a client whose account stops showing as
+/// in game (disconnected, but the process is still open) is restarted, and every client can be
+/// restarted after a set time.
 /// </summary>
 public static class WatchdogService
 {
@@ -78,7 +83,12 @@ public static class WatchdogService
     public static void Init(Func<long, Account?> accountLookup)
     {
         _accountLookup = accountLookup;
-        if (!_hooked) { ProcessRegistry.Exited += OnClientExited; _hooked = true; }
+        if (!_hooked)
+        {
+            ProcessRegistry.Exited += OnClientExited;
+            PresenceService.PresenceUpdated += CheckDisconnects;
+            _hooked = true;
+        }
     }
 
     public static void Apply()
@@ -86,6 +96,13 @@ public static class WatchdogService
         var s = SettingsService.Current;
         if (s.WatchdogEnabled) Start(Math.Max(5, s.WatchdogCheckSeconds));
         else Stop();
+
+        lock (_gate)
+        {
+            if (s.RestartClientsEnabled)
+                _restartTimer ??= new System.Threading.Timer(_ => RestartTick(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+            else { _restartTimer?.Dispose(); _restartTimer = null; }
+        }
     }
 
     private static void Start(int seconds)
@@ -187,5 +204,142 @@ public static class WatchdogService
                 ToastService.Warning(L.T("Toast.ClientClosed.Title"), $"{t.Alias}: {result.Message}");
         }
         catch (Exception ex) { DiagnosticsService.Warn("watchdog", $"Rejoin of {t.Alias} failed", ex); }
+    }
+
+    // ---------------------------------------------------------------- disconnects
+
+    /// <summary>Per client: when its account was last seen in game, and when the manager first saw the client.</summary>
+    private sealed class PresenceTrack
+    {
+        public DateTime FirstSeenUtc = DateTime.UtcNow;
+        public DateTime? LastInGameUtc;
+        public bool Handled;
+    }
+
+    private static readonly ConcurrentDictionary<int, PresenceTrack> _presence = new();
+
+    /// <summary>
+    /// Runs after every presence poll. A client whose account was in game and has not been for
+    /// <see cref="AppSettings.DisconnectMinutes"/> — or that never got into a game within a few
+    /// minutes — is closed and rejoined like a crash (same retries, same crash-loop cap). Accounts
+    /// with more than one client are skipped: presence can't tell which of them dropped.
+    /// </summary>
+    private static void CheckDisconnects()
+    {
+        try
+        {
+            var s = SettingsService.Current;
+            if (!s.WatchdogEnabled || !s.RejoinOnDisconnect || !s.ShowPresence) { _presence.Clear(); return; }
+
+            var clients = ProcessRegistry.All.Where(t => !t.IsExternal && t.UserId > 0).ToList();
+            foreach (int pid in _presence.Keys.Except(clients.Select(t => t.Pid)).ToList()) _presence.TryRemove(pid, out _);
+
+            var now = DateTime.UtcNow;
+            var limit = TimeSpan.FromMinutes(s.DisconnectMinutes);
+            foreach (var group in clients.GroupBy(t => t.UserId).Where(g => g.Count() == 1))
+            {
+                var t = group.First();
+                if (t.ClosingIntentionally || (t.Target.Kind == JoinKind.Place && t.Target.PlaceId <= 0)) continue;   // home screen
+                var acc = _accountLookup?.Invoke(t.UserId);
+                if (acc == null || !acc.AutoRejoin) continue;
+
+                var st = _presence.GetOrAdd(t.Pid, _ => new PresenceTrack());
+                if (acc.Presence == PresenceStatus.InGame) { st.LastInGameUtc = now; st.Handled = false; continue; }
+                if (st.Handled) continue;
+
+                // Never in game yet: give loading (and a slow presence update) at least five minutes.
+                var since = st.LastInGameUtc ?? st.FirstSeenUtc;
+                var wait = st.LastInGameUtc == null ? TimeSpan.FromMinutes(Math.Max(5, s.DisconnectMinutes)) : limit;
+                if (now - since < wait) continue;
+
+                st.Handled = true;
+                RecoverDisconnected(t, acc);
+            }
+        }
+        catch (Exception ex) { DiagnosticsService.Warn("watchdog", "Disconnect check failed", ex); }
+    }
+
+    private static void RecoverDisconnected(ProcessRegistry.Tracked t, Account acc)
+    {
+        int claim = TryClaimRejoin(acc.UserId);
+        if (claim == 0)
+        {
+            // Crash-loop cap reached: leave the client as it is; the overview lists the pause.
+            DiagnosticsService.Warn("watchdog", $"{t.Alias} is not in game, but auto-rejoin is paused after repeated rejoins");
+            return;
+        }
+
+        DiagnosticsService.Warn("watchdog", $"{t.Alias} has not been in game for a while (disconnected?); restarting its client");
+        if (SettingsService.Current.ToastOnCrash)
+            ToastService.Warning(L.T("Toast.ClientClosed.Title"), L.T("Watchdog.Disconnected", t.Alias));
+
+        ProcessRegistry.MarkClosing(t.Pid);   // our own close: the exit must not trigger a second rejoin
+        _ = Task.Run(async () =>
+        {
+            try { InstanceControlService.Close(t.Pid); } catch (Exception ex) { DiagnosticsService.Warn("watchdog", "Closing a disconnected client failed", ex); }
+            await RejoinAsync(acc, t, t.Target.ForRejoin(claim));
+        });
+    }
+
+    // ---------------------------------------------------------------- timed restart
+
+    private static System.Threading.Timer? _restartTimer;
+    private static DateTime _lastRestartUtc = DateTime.MinValue;
+    private static int _restarting;
+
+    /// <summary>
+    /// Restarts the longest-running client once it has been up for <see cref="AppSettings.RestartClientsMinutes"/>.
+    /// One client per minute at most, so a batch launched together isn't restarted all at once, and
+    /// never while a restart is still in progress or the manager is locked (it couldn't relaunch).
+    /// </summary>
+    private static void RestartTick()
+    {
+        try
+        {
+            var s = SettingsService.Current;
+            if (!s.RestartClientsEnabled || LockService.IsLocked) return;
+            if (DateTime.UtcNow - _lastRestartUtc < TimeSpan.FromMinutes(1)) return;
+            if (Volatile.Read(ref _restarting) != 0) return;
+
+            var limit = TimeSpan.FromMinutes(s.RestartClientsMinutes);
+            var due = ProcessRegistry.All
+                .Where(t => !t.IsExternal && t.UserId > 0 && !t.ClosingIntentionally && t.Uptime >= limit
+                            && !(t.Target.Kind == JoinKind.Place && t.Target.PlaceId <= 0))
+                .OrderByDescending(t => t.Uptime)
+                .FirstOrDefault();
+            if (due == null) return;
+
+            var acc = _accountLookup?.Invoke(due.UserId);
+            if (acc == null || string.IsNullOrEmpty(acc.Cookie)) return;
+
+            _lastRestartUtc = DateTime.UtcNow;
+            Interlocked.Exchange(ref _restarting, 1);
+            _ = RestartAsync(acc, due);
+        }
+        catch (Exception ex) { DiagnosticsService.Warn("watchdog", "Timed restart check failed", ex); }
+    }
+
+    private static async Task RestartAsync(Account acc, ProcessRegistry.Tracked t)
+    {
+        try
+        {
+            // A long-lived public server may be gone by now: go back to the place, not that server.
+            var target = t.Target.Kind == JoinKind.Server ? t.Target.WithoutServer() : t.Target;
+            DiagnosticsService.Log("watchdog", $"Timed restart of {t.Alias} after {(int)t.Uptime.TotalMinutes} min into {target}");
+
+            ProcessRegistry.MarkClosing(t.Pid);   // deliberate: no crash handling
+            await Task.Run(() => InstanceControlService.Close(t.Pid));
+            await Task.Delay(3000);
+
+            var result = await LauncherService.LaunchAsync(acc, target, t.Profile);
+            if (!result.Success)
+            {
+                DiagnosticsService.Warn("watchdog", $"Timed restart of {t.Alias} could not relaunch: {result.Message}");
+                if (SettingsService.Current.ToastOnCrash)
+                    ToastService.Warning(L.T("Toast.ClientClosed.Title"), $"{t.Alias}: {result.Message}");
+            }
+        }
+        catch (Exception ex) { DiagnosticsService.Warn("watchdog", $"Timed restart of {t.Alias} failed", ex); }
+        finally { Interlocked.Exchange(ref _restarting, 0); }
     }
 }

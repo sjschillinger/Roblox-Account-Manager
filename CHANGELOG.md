@@ -50,6 +50,16 @@ into the exe and shown in **What's new**, so a release no longer needs its own n
   extra delay per preset. A failed account doesn't stop the rest; the result reads "5 launched,
   1 failed". A **Stop** button ends a running batch before the next account.
 - **Paused auto-rejoin is shown on the overview** with a **Resume** button, instead of only a toast.
+- **Saved places remember their server.** The launch bar's bookmark saves the Job ID or
+  private-server / share link with the place (encrypted), and presets can use a saved place, so a
+  link is pasted once and several presets can share it. The launch bar also keeps its last server
+  and player entries.
+- **Rejoin after a disconnect** (optional): a client whose account stops showing as in game — a
+  network drop that leaves it on an error screen — is closed and rejoined, with the same limits as
+  crash recovery.
+- **Restart clients regularly** (optional): each client is relaunched after a set time, one at a
+  time, into the same game and server type.
+- The manager's own memory use is shown under Settings → Diagnostics and in the copied report.
 - **Test the browser** under Settings → Browser, **Copy report** under Settings → Diagnostics (with
   cookies, tokens, webhooks and private-server codes removed), and **Minimize** per client.
 - Local API: `/launch` takes `link=` or `followUserId=`; new `/preset?name=`.

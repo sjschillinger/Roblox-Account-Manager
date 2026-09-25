@@ -132,6 +132,14 @@
                         </Grid>
 
                         <StackPanel Grid.Row="1" Margin="0,18,0,0">
+                            <TextBlock Text="{DynamicResource Str.Automation.Saved}" Style="{StaticResource Text.Label}" />
+                            <ComboBox HorizontalAlignment="Left" MinWidth="280" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                      ItemsSource="{Binding DataContext.SavedPlaceChoices, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                      SelectedValue="{Binding SavedPlaceId}" ToolTip="{DynamicResource Str.Automation.Saved.Desc}" />
+                            <TextBlock Text="{DynamicResource Str.Automation.Saved.Using}" Style="{StaticResource Text.Caption}" Margin="0,6,0,0" TextWrapping="Wrap"
+                                       Visibility="{Binding UsesSaved, Converter={StaticResource BoolToVis}}" />
+
+                            <StackPanel Margin="0,14,0,0" Visibility="{Binding UsesSaved, Converter={StaticResource InverseBoolToVis}}">
                             <TextBlock Text="{DynamicResource Str.Automation.Destination}" Style="{StaticResource Text.Label}" />
                             <Border Style="{StaticResource Segmented}" HorizontalAlignment="Left">
                                 <StackPanel Orientation="Horizontal">
@@ -163,6 +171,7 @@
                             </Grid>
                             <TextBlock Text="{Binding TargetHint}" Style="{StaticResource Text.Caption}" Margin="0,6,0,0" TextWrapping="Wrap"
                                        Visibility="{Binding TargetHint, Converter={StaticResource NullToVis}}" />
+                            </StackPanel>
 
                             <Grid Margin="0,12,0,0">
                                 <Grid.ColumnDefinitions>

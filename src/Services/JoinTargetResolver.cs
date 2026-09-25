@@ -66,6 +66,14 @@ public static class JoinTargetResolver
     /// <summary>The destination a preset launches into.</summary>
     public static async Task<Result> ForPresetAsync(LaunchPreset p, Func<string> cookie)
     {
+        if (p.SavedPlaceId.Length > 0)
+        {
+            var saved = SettingsService.Current.SavedPlaces.FirstOrDefault(s => s.Id == p.SavedPlaceId);
+            if (saved == null) return Result.Fail(L.T("Automation.Saved.Missing"));
+            // Same rules as the launch bar the bookmark was saved from.
+            return await FromServerInputAsync(saved.Server, saved.PlaceId, cookie);
+        }
+
         switch (p.Destination)
         {
             case JoinKind.FollowUser:

@@ -34,6 +34,12 @@ public class LaunchPreset
     public long FollowUserId { get; set; }
     public string FollowUsername { get; set; } = "";
 
+    /// <summary>
+    /// A saved place (launch bar bookmark) this preset launches into instead of its own destination
+    /// fields; empty = use the fields above. Editing the saved place updates every preset using it.
+    /// </summary>
+    public string SavedPlaceId { get; set; } = "";
+
     public int JoinDelaySeconds { get; set; } = 8;
 
     /// <summary>Up to this many extra seconds, picked at random, on top of <see cref="JoinDelaySeconds"/>.</summary>

@@ -612,7 +612,7 @@
                                                                                 </Border>
                                                                                 <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
                                                                                     <TextBlock Text="{Binding Name}" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" TextTrimming="CharacterEllipsis" />
-                                                                                    <TextBlock Text="{Binding PlaceId}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                                                                                    <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
                                                                                 </StackPanel>
                                                                             </Grid>
                                                                         </Button>

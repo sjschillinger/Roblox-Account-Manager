@@ -89,6 +89,24 @@ public class PresetItem : ObservableObject
         }
     }
 
+    /// <summary>Id of the saved place this preset uses instead of its own destination; "" = its own.</summary>
+    public string SavedPlaceId
+    {
+        get => Model.SavedPlaceId;
+        set
+        {
+            Model.SavedPlaceId = value ?? "";
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(UsesSaved));
+            OnPropertyChanged(nameof(Summary));
+            _owner.Persist();
+        }
+    }
+
+    public bool UsesSaved => Model.SavedPlaceId.Length > 0;
+
+    private SavedPlace? Saved => UsesSaved ? SettingsService.Current.SavedPlaces.FirstOrDefault(p => p.Id == Model.SavedPlaceId) : null;
+
     /// <summary>"Place", "Server", "PrivateServer" or "FollowUser" — bound to the segmented picker.</summary>
     public string Destination
     {
@@ -252,7 +270,9 @@ public class PresetItem : ObservableObject
         => string.Equals(a.Username, key, StringComparison.OrdinalIgnoreCase)
         || (a.Alias.Length > 0 && string.Equals(a.Alias, key, StringComparison.OrdinalIgnoreCase));
 
-    public string Summary => Model.Destination == JoinKind.FollowUser
+    public string Summary => UsesSaved
+        ? L.N("Automation.Preset.SummarySaved", Model.Aliases.Count, Saved?.Name ?? L.T("Automation.Saved.Gone"))
+        : Model.Destination == JoinKind.FollowUser
         ? L.N("Automation.Preset.SummaryFollow", Model.Aliases.Count, Model.FollowUsername)
         : Model.PlaceId > 0
             ? L.N("Automation.Preset.Summary", Model.Aliases.Count, Model.PlaceId)
@@ -488,12 +508,20 @@ public class AutomationViewModel : ObservableObject
     public ObservableCollection<ScheduleItem> Schedules { get; } = new();
     public IEnumerable<string> PresetNames => Presets.Select(p => p.Name).ToList();
 
+    /// <summary>The launch bar's saved places, for a preset's "Saved place" picker. First entry = none.</summary>
+    public IReadOnlyList<Choice> SavedPlaceChoices =>
+        new[] { new Choice("", L.T("Automation.Saved.None")) }
+            .Concat(SettingsService.Current.SavedPlaces.Select(p => new Choice(p.Id, p.Name)))
+            .ToList();
+
     private string _section = "Presets";
     public string Section { get => _section; set => SetField(ref _section, value ?? "Presets"); }
 
     /// <summary>Opens the first preset and schedule so the editor isn't empty on the first visit.</summary>
     public void OnShown()
     {
+        OnPropertyChanged(nameof(SavedPlaceChoices));   // saved from the launch bar meanwhile
+        foreach (var p in Presets) p.RaiseAll();
         SelectedPreset ??= Presets.FirstOrDefault();
         SelectedSchedule ??= Schedules.FirstOrDefault();
     }

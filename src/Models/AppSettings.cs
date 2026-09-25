@@ -76,6 +76,11 @@ public class AppSettings
     public bool SkipChromiumPrompt { get; set; } = false;
     public List<SavedPlace> SavedPlaces { get; set; } = new();
 
+    /// <summary>The launch bar's server box (Job ID or private/share link) and player box from the last launch.</summary>
+    [JsonConverter(typeof(ProtectedStringConverter))]
+    public string LastServerInput { get; set; } = "";
+    public string LastFollowInput { get; set; } = "";
+
     // ---- Anti-AFK ----
     public bool AntiAfkEnabled { get; set; } = false;
     public int AntiAfkIntervalMinutes { get; set; } = 15;
@@ -92,6 +97,17 @@ public class AppSettings
     // ---- Crash watchdog ----
     public bool WatchdogEnabled { get; set; } = false;
     public int WatchdogCheckSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Also rejoin when an account with a running client stops showing as in game (a disconnect
+    /// dialog keeps the process alive, so the exit-based watchdog never sees it). Needs presence.
+    /// </summary>
+    public bool RejoinOnDisconnect { get; set; } = false;
+    public int DisconnectMinutes { get; set; } = 3;
+
+    /// <summary>Close and relaunch every client after it has run this long (fresh session, memory back).</summary>
+    public bool RestartClientsEnabled { get; set; } = false;
+    public int RestartClientsMinutes { get; set; } = 180;
 
     // ---- Startup checks ----
     public bool ValidateCookiesOnStartup { get; set; } = false;

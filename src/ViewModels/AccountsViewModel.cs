@@ -65,6 +65,9 @@ public class AccountsViewModel : ObservableObject
         };
 
         PlaceIdText = SettingsService.Current.DefaultPlaceId > 0 ? SettingsService.Current.DefaultPlaceId.ToString() : "";
+        // The server box and the player box keep what was last launched with, like the place does.
+        JobIdText = SettingsService.Current.LastServerInput;
+        FollowText = SettingsService.Current.LastFollowInput;
         foreach (var p in SettingsService.Current.SavedPlaces) SavedPlaces.Add(p);
 
         AddCommand = new AsyncRelayCommand(_ => AddAsync(0));
@@ -964,11 +967,25 @@ public class AccountsViewModel : ObservableObject
 
         var result = await JoinTargetResolver.FromServerInputAsync(input, placeId,
             () => sel.FirstOrDefault(a => a.IsValid)?.Cookie ?? _store.Accounts.FirstOrDefault(a => a.IsValid)?.Cookie ?? "");
-        if (result.Target != null) return result.Target;
+        if (result.Target != null)
+        {
+            RememberInput(input, null);
+            return result.Target;
+        }
 
         _main.SetStatus(result.Error ?? "");
         if (result.ErrorTitle != null) ToastService.Warning(result.ErrorTitle, result.Error ?? "");
         return null;
+    }
+
+    /// <summary>Keeps the launch bar's server / player box for next time (the place box is remembered in <see cref="TryPlaceId"/>).</summary>
+    private static void RememberInput(string? server, string? follow)
+    {
+        var s = SettingsService.Current;
+        bool changed = false;
+        if (server != null && s.LastServerInput != server) { s.LastServerInput = server; changed = true; }
+        if (follow != null && s.LastFollowInput != follow) { s.LastFollowInput = follow; changed = true; }
+        if (changed) SettingsService.Save();
     }
 
     private async Task ShuffleJoinAsync()
@@ -1028,6 +1045,7 @@ public class AccountsViewModel : ObservableObject
         _main.SetStatus(L.T("Follow.LookingUp", user));
         long id = await JoinTargetResolver.ResolveUserIdAsync(user);
         if (id <= 0) { _main.SetStatus(L.T("Follow.NotFound", user)); ToastService.Error(L.T("Launch.FailedTitle"), L.T("Follow.NotFound", user)); return; }
+        RememberInput(null, FollowText.Trim());
         await LaunchSequential(sel, new JoinTarget(0, FollowUserId: id));
     }
 
@@ -1112,9 +1130,18 @@ public class AccountsViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(name)) return;
         name = name.Trim();
 
+        // Saving under an existing name replaces it but keeps its id, so presets using it follow along.
         var existing = SavedPlaces.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
         if (existing != null) SavedPlaces.Remove(existing);
-        SavedPlaces.Add(new SavedPlace { Name = name, PlaceId = placeId, IconUrl = GameIcon, UniverseId = _lastUniverseId });
+        SavedPlaces.Add(new SavedPlace
+        {
+            Id = existing?.Id is { Length: > 0 } id ? id : Guid.NewGuid().ToString("N"),
+            Name = name,
+            PlaceId = placeId,
+            Server = JobIdText.Trim(),
+            IconUrl = GameIcon,
+            UniverseId = _lastUniverseId,
+        });
 
         PersistSavedPlaces();
         _ = LoadSavedPlaceIconsAsync();
@@ -1133,7 +1160,7 @@ public class AccountsViewModel : ObservableObject
         if (place == null) return;
         SavedPlacesOpen = false;
         PlaceIdText = place.PlaceId.ToString();
-        JobIdText = "";
+        JobIdText = place.Server;
     }
 
     private bool _loadingIcons;
