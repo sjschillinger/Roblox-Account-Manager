@@ -190,6 +190,10 @@
                                                                 ToolTip="{DynamicResource Str.Clients.Focus}" IsEnabled="{Binding HasWindow}"
                                                                 Command="{Binding DataContext.FocusClientCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                                 CommandParameter="{Binding Pid}" />
+                                                        <Button Style="{StaticResource Btn.Icon}" Width="30" Height="30" ctl:Ui.Icon="{StaticResource Icon.Minimize}"
+                                                                ToolTip="{DynamicResource Str.Clients.Minimize}" IsEnabled="{Binding HasWindow}"
+                                                                Command="{Binding DataContext.MinimizeClientCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                CommandParameter="{Binding Pid}" />
                                                         <Button Style="{StaticResource Btn.Icon}" Width="30" Height="30" ctl:Ui.Icon="{StaticResource Icon.Close}"
                                                                 ToolTip="{DynamicResource Str.Clients.Close}"
                                                                 Command="{Binding DataContext.CloseClientCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
