@@ -15,6 +15,49 @@ into the exe and shown in **What's new**, so a release no longer needs its own n
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Browser sign-in no longer reports "The sign-in window was closed" while the window is open.** The
+  sign-in followed the process that was started first, which a Chromium launcher can hand off and
+  exit. Whether the window is open now comes from the browser itself over DevTools, and closing the
+  browser afterwards goes through DevTools too, so no browser or profile is left behind.
+- **Private servers in presets.** A private-server link pasted into a preset's "Server ID" box was
+  launched as a Job ID and failed. Presets now have a destination (game, server, private server,
+  join player); existing presets are converted on start, including links that were typed into the
+  old box.
+- **Auto-rejoin returns to the same destination.** A client that crashed in a private server or
+  while following a player used to rejoin a public server of the place. A public server that fails
+  twice is swapped for any server of the place, and a failed relaunch is retried twice.
+- Pasting a game link with a private-server code into a Place ID box no longer turns the code into
+  part of the place number.
+- Launch errors no longer echo the launch link, which carries a one-time sign-in ticket.
+
+### Added
+
+- **Join player** and **private server** destinations for presets, with the player looked up while
+  you type.
+- **Ultra-low AFK performance profile** per preset: FPS cap (15 by default), lowest graphics,
+  optional minimize after launch. The next launch without it restores your normal settings.
+- **Random Anti-AFK timing.** Each client gets its own schedule, optionally random between two
+  intervals, so several clients aren't focused at the same second. The overview shows when each
+  client gets its next key press and how often it was rejoined.
+- **Batch launches wait for each client** before starting the next account, plus an optional random
+  extra delay per preset. A failed account doesn't stop the rest; the result reads "5 launched,
+  1 failed".
+- **Test the browser** under Settings → Browser, **Copy report** under Settings → Diagnostics (with
+  cookies, tokens, webhooks and private-server codes removed), and **Minimize** per client.
+- Local API: `/launch` takes `link=` or `followUserId=`; new `/preset?name=`.
+
+### Changed
+
+- The memory settings say what they do: the RAM threshold force-closes a client (it is not a memory
+  limit), and trimming frees memory only until the client needs it again. Auto-trim runs at most
+  every 5 minutes.
+
+---
+
 ## v2.0.0 — 2026-09-17
 
 Rebuilt from the ground up: a new interface, eight languages, and every feature that was still open
