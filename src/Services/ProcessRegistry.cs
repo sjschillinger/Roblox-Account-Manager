@@ -6,7 +6,7 @@ namespace RobloxAccountManager.Services;
 
 /// <summary>
 /// Tracks the RobloxPlayerBeta processes this app launched, keyed by PID, with the
-/// account + place/job they belong to. Foundation for Anti-AFK, the crash watchdog,
+/// account + destination they belong to. Foundation for Anti-AFK, the crash watchdog,
 /// the RAM monitor and the window-grid manager.
 /// </summary>
 public static class ProcessRegistry
@@ -25,10 +25,19 @@ public static class ProcessRegistry
     {
         public long UserId { get; init; }
         public string Alias { get; init; } = "";
-        public string Cookie { get; init; } = "";
         public int Pid { get; set; }
-        public long PlaceId { get; init; }
-        public string? JobId { get; init; }
+
+        /// <summary>
+        /// Where the launch was sent — kept whole so a rejoin goes back to the same private server or
+        /// followed player instead of degrading to "place + job".
+        /// </summary>
+        public JoinTarget Target { get; init; } = new(0);
+        public long PlaceId => Target.PlaceId;
+        public string? JobId => Target.JobId;
+
+        /// <summary>Performance profile the client was launched with (reapplied on a rejoin).</summary>
+        public string? Profile { get; init; }
+
         public DateTime LaunchedUtc { get; init; } = DateTime.UtcNow;
 
         /// <summary>True for clients adopted from outside the manager (see <see cref="AdoptUntracked"/>).</summary>
@@ -93,7 +102,7 @@ public static class ProcessRegistry
     /// earlier launch — without this bound a launch that failed silently would steal someone
     /// else's client.
     /// </param>
-    public static int RegisterNewest(Account acc, long placeId, string? jobId, DateTime? launchedAt = null)
+    public static int RegisterNewest(Account acc, JoinTarget target, string? profile = null, DateTime? launchedAt = null)
     {
         var procs = Process.GetProcessesByName(ClientProcess);
         try
@@ -121,10 +130,9 @@ public static class ProcessRegistry
             {
                 UserId = acc.UserId,
                 Alias = acc.DisplayNameOrUser,
-                Cookie = acc.Cookie,
                 Pid = candidate.proc.Id,
-                PlaceId = placeId,
-                JobId = jobId,
+                Target = target,
+                Profile = profile,
                 ProcessName = ClientProcess,
                 StartTimeLocal = candidate.start,
             };
@@ -175,10 +183,7 @@ public static class ProcessRegistry
                     {
                         UserId = 0,
                         Alias = "External client",
-                        Cookie = "",
                         Pid = p.Id,
-                        PlaceId = 0,
-                        JobId = null,
                         LaunchedUtc = start.ToUniversalTime(),
                         IsExternal = true,
                         ProcessName = ClientProcess,

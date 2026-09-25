@@ -8,6 +8,13 @@ using RobloxAccountManager.Services;
 namespace RobloxAccountManager.ViewModels;
 
 /// <summary>A running Roblox client as shown on the Overview.</summary>
+/// <summary>An account whose next auto-rejoin is waiting out a backoff delay after repeated crashes.</summary>
+public sealed class WaitingRejoinRow
+{
+    public long UserId { get; init; }
+    public string Text { get; init; } = "";
+}
+
 public sealed class ClientRow
 {
     public int Pid { get; init; }
@@ -53,6 +60,8 @@ public class DashboardViewModel : ObservableObject
         CloseAllCommand = new RelayCommand(_ => CloseAll());
         FocusClientCommand = new RelayCommand(p => { if (p is int pid && !InstanceControlService.Focus(pid)) _main.SetStatus(L.T("Clients.NoWindow")); });
         CloseClientCommand = new RelayCommand(p => { if (p is int pid) _ = Task.Run(() => { InstanceControlService.Close(pid); }); });
+        MinimizeClientCommand = new RelayCommand(p => { if (p is int pid && !InstanceControlService.Minimize(pid)) _main.SetStatus(L.T("Clients.NoWindow")); });
+        CancelRejoinCommand = new RelayCommand(p => { if (p is long id) { WatchdogService.CancelRejoin(id); RefreshClients(); } });
         OpenAccountCommand = new RelayCommand(p => { if (p is Account a) _main.ShowAccount(a); });
         FixAccountCommand = new AsyncRelayCommand(p => FixAsync(p as Account));
 
@@ -205,6 +214,10 @@ public class DashboardViewModel : ObservableObject
     // ================================================================ running clients
 
     public ObservableCollection<ClientRow> Clients { get; } = new();
+
+    /// <summary>Rejoins waiting out a backoff delay, with a Stop action — a toast alone is easy to miss.</summary>
+    public ObservableCollection<WaitingRejoinRow> WaitingRejoins { get; } = new();
+    public bool HasWaitingRejoins => WaitingRejoins.Count > 0;
     public bool HasClients => Clients.Count > 0;
 
     public void RefreshClients()
@@ -219,9 +232,17 @@ public class DashboardViewModel : ObservableObject
             string name = c.IsExternal ? L.T("Clients.External")
                         : MaskUsernames ? "••••••"
                         : acc?.DisplayNameOrUser ?? c.Alias;
-            string detail = acc != null && acc.Presence == PresenceStatus.InGame && acc.LastLocation.Length > 0
-                ? acc.LastLocation
-                : c.PlaceId > 0 ? L.T("Place.Fallback", c.PlaceId) : L.T("Clients.NoPlace");
+            string detail = !c.HasWindow ? L.T("Clients.Starting")
+                : acc != null && acc.Presence == PresenceStatus.InGame && acc.LastLocation.Length > 0 ? acc.LastLocation
+                : Destination(c.Target);
+
+            // Extras only when they carry information: how often the watchdog brought it back, and
+            // when Anti-AFK next presses a key (roughly: it runs on a 15 s tick).
+            int rejoins = c.UserId > 0 ? WatchdogService.RejoinsFor(c.UserId) : 0;
+            if (rejoins > 0) detail += "  ·  " + L.N("Clients.Rejoins", rejoins);
+            var (_, nextAfk) = AntiAfkService.StatusFor(c.Pid);
+            if (nextAfk is { } due)
+                detail += "  ·  " + L.T("Clients.AfkNext", Math.Max(1, (int)Math.Ceiling((due - DateTime.UtcNow).TotalMinutes)));
             Clients.Add(new ClientRow
             {
                 Pid = c.Pid,
@@ -236,9 +257,27 @@ public class DashboardViewModel : ObservableObject
         }
         OnPropertyChanged(nameof(HasClients));
         OnPropertyChanged(nameof(ClientsTitle));
+
+        WaitingRejoins.Clear();
+        foreach (var (id, due) in WatchdogService.PendingRejoins())
+        {
+            byId.TryGetValue(id, out var acc);
+            string who = MaskUsernames ? "••••••" : acc?.DisplayNameOrUser ?? id.ToString();
+            int mins = Math.Max(1, (int)Math.Ceiling((due - DateTime.UtcNow).TotalMinutes));
+            WaitingRejoins.Add(new WaitingRejoinRow { UserId = id, Text = L.T("Watchdog.Waiting", who, mins) });
+        }
+        OnPropertyChanged(nameof(HasWaitingRejoins));
     }
 
     public string ClientsTitle => L.N("Clients.Title", Clients.Count);
+
+    /// <summary>Where a client was sent. Never shows private-server codes.</summary>
+    private static string Destination(JoinTarget t) => t.Kind switch
+    {
+        JoinKind.FollowUser => L.T("Clients.Dest.Follow", t.FollowUserId),
+        JoinKind.PrivateServer => L.T("Clients.Dest.Private", t.PlaceId),
+        _ => t.PlaceId > 0 ? L.T("Place.Fallback", t.PlaceId) : L.T("Clients.NoPlace"),
+    };
 
     // ================================================================ commands
 
@@ -250,6 +289,8 @@ public class DashboardViewModel : ObservableObject
     public RelayCommand CloseAllCommand { get; }
     public RelayCommand FocusClientCommand { get; }
     public RelayCommand CloseClientCommand { get; }
+    public RelayCommand MinimizeClientCommand { get; }
+    public RelayCommand CancelRejoinCommand { get; }
     public RelayCommand OpenAccountCommand { get; }
     public AsyncRelayCommand FixAccountCommand { get; }
 
