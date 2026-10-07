@@ -15,6 +15,15 @@ into the exe and shown in **What's new**, so a release no longer needs its own n
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Anti-AFK key presses now reach the game.** The window came to the front but the character never
+  jumped: the key was sent as a Windows key code without the keyboard's scan code, and Roblox reads
+  the scan code. Each visit is now logged ("Pressed Space 3x in …'s window"), and a press Windows
+  refuses is reported.
+
 ## v2.3.0 — 2026-10-07 (community build)
 
 Keeps several accounts running for a day or more without anyone watching: clients start one at a
