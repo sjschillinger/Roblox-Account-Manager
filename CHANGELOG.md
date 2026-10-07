@@ -15,6 +15,20 @@ into the exe and shown in **What's new**, so a release no longer needs its own n
 
 ---
 
+## v2.3.1 — 2026-10-07 (community build)
+
+**Don't update from inside the app.** The in-app updater follows the original project's releases,
+not this one; updating there replaces this build with a version that doesn't have these fixes. Turn
+off **Settings → Updates → Check automatically** and **Check at startup**, and press **Skip this
+version** if an update window still appears.
+
+### Fixed
+
+- **Anti-AFK key presses now reach the game.** The window came to the front but the character never
+  jumped: the key was sent as a Windows key code without the keyboard's scan code, and Roblox reads
+  the scan code. Each visit is now logged ("Pressed Space 3x in …'s window"), and a press Windows
+  refuses is reported.
+
 ## v2.3.0 — 2026-10-07 (community build)
 
 Keeps several accounts running for a day or more without anyone watching: clients start one at a
