@@ -15,7 +15,12 @@ into the exe and shown in **What's new**, so a release no longer needs its own n
 
 ---
 
-## Unreleased
+## v2.3.1 — 2026-10-07 (community build)
+
+**Don't update from inside the app.** The in-app updater follows the original project's releases,
+not this one; updating there replaces this build with a version that doesn't have these fixes. Turn
+off **Settings → Updates → Check automatically** and **Check at startup**, and press **Skip this
+version** if an update window still appears.
 
 ### Fixed
 
