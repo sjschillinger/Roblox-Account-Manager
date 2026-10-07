@@ -12,6 +12,20 @@ public static class LauncherService
     // attribution tasks, read from the UI thread and the "close all" hotkey.
     private static readonly ConcurrentDictionary<long, int> _lastProcess = new();
 
+    // One client starts at a time, from the moment its ticket is fetched until it has been
+    // attributed (or given up on) and has had a few seconds to settle. Several clients starting in
+    // the same seconds — every rejoin after a Roblox update closed them all — got each other's
+    // logs and windows, and a client could hand its launch to another one.
+    private static readonly SemaphoreSlim _launchGate = new(1, 1);
+    private static readonly TimeSpan LaunchSettle = TimeSpan.FromSeconds(3);
+
+    /// <summary>Releases the launch gate once <paramref name="client"/> is attributed and has settled.</summary>
+    private static void ReleaseAfter(Task<int> client)
+        => _ = client.ContinueWith(async _ =>
+        {
+            try { await Task.Delay(LaunchSettle); } finally { _launchGate.Release(); }
+        }, TaskScheduler.Default);
+
     private static AccountStore? _store;
     public static void Init(AccountStore store) => _store = store;
 
@@ -106,91 +120,100 @@ public static class LauncherService
         var settings = SettingsService.Current;
         EnsureMultiInstance(settings.EnableMultiInstance);
 
-        // Frame-rate cap, FastFlags, the profile and this account's own overrides, before the process starts.
-        try
-        {
-            bool hadUndo = settings.ProfileUndo != null || settings.FpsCapBeforeProfile != null;
-            FFlagsService.ApplyForLaunch(settings, acc, profile);
-            if (hadUndo || !string.IsNullOrEmpty(profile)) SettingsService.Save();
-        }
-        catch (Exception ex) { DiagnosticsService.Warn("launcher", "Could not apply graphics settings before launch", ex); }
-
         string tracker = EnsureTrackerId(acc);
 
-        var (ticket, rotated, error) = await RobloxApi.GetAuthTicketDetailedAsync(acc.Cookie);
-        if (string.IsNullOrEmpty(ticket))
-        {
-            // Only an outright rejection (401/403) may mark the account invalid — a 429 from
-            // launching several accounts at once must not condemn them all.
-            var (identity, rejected) = await RobloxApi.GetAuthenticatedUserDetailedAsync(acc.Cookie);
-            if (identity == null && rejected)
-            {
-                acc.MarkValidated(false);
-                try { _store?.Save(); } catch { }
-                return LaunchResult.Fail(L.T("Launch.CookieExpired"), retryable: false);
-            }
-            if (identity == null)
-                return LaunchResult.Fail(L.T("Launch.Unreachable", error));
-
-            acc.MarkValidated(true);
-            return LaunchResult.Fail(L.T("Launch.NoTicket", error));
-        }
-        acc.MarkValidated(true);
-        PersistRotatedCookie(acc, rotated);
-
-        if (settings.AutoCloseLastProcess) CloseLast(acc);
-
-        long launchTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-        // Sanitise a pasted Job ID: stray whitespace, quotes and commas from copy-paste.
-        string? jobId = target.JobId?.Trim().Trim('"', '\'', ',', ' ');
-        if (string.IsNullOrWhiteSpace(jobId)) jobId = null;
-        target = target with { JobId = jobId };
-
-        string uri = "roblox-player:1"
-            + "+launchmode:play"
-            + $"+gameinfo:{ticket}"
-            + $"+launchtime:{launchTime}"
-            + $"+placelauncherurl:{HttpUtility.UrlEncode(PlaceLauncherUrl(target, tracker))}"
-            + $"+browsertrackerid:{tracker}"
-            + "+robloxLocale:en_us+gameLocale:en_us+channel:+LaunchExp:InApp";
-
+        await _launchGate.WaitAsync();
+        bool handedOff = false;
         try
         {
-            // Only clients that appear after this instant can belong to this launch. Backdated a
-            // little: the protocol handler may have spawned the client before Process.Start returns.
-            DateTime launchedAt = DateTime.Now.AddSeconds(-2);
-
-            using (Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true })) { }
-            acc.LastUse = DateTime.Now;
-
-            _ = Task.Run(async () =>
+            // Frame-rate cap, FastFlags, the profile and this account's own overrides, before the process
+            // starts. Inside the gate: two launches writing the flag files at once failed with "file in use".
+            try
             {
-                // Presence flips to "In Game" a few seconds after the join; poll twice so the
-                // dashboard catches it quickly.
-                await Task.Delay(4000);
-                try { await PresenceService.PollNowAsync(); } catch { }
-                await Task.Delay(6000);
-                try { await PresenceService.PollNowAsync(); } catch { }
-            });
+                bool hadUndo = settings.ProfileUndo != null || settings.FpsCapBeforeProfile != null;
+                FFlagsService.ApplyForLaunch(settings, acc, profile);
+                if (hadUndo || !string.IsNullOrEmpty(profile)) SettingsService.Save();
+            }
+            catch (Exception ex) { DiagnosticsService.Warn("launcher", "Could not apply graphics settings before launch", ex); }
+            if (settings.ResizeClientWindows) RobloxClientSettingsService.WriteWindowed();
 
-            // What presence said before this launch: a stale "in game" from the previous session must
-            // not count as this client having loaded (see MinimizeWhenInGameAsync).
-            string? gameBefore = acc.Presence == PresenceStatus.InGame ? acc.GameId ?? "" : null;
-            var client = Task.Run(() => AttributeClientAsync(acc, target, profile, launchedAt, gameBefore));
+            var (ticket, rotated, error) = await RobloxApi.GetAuthTicketDetailedAsync(acc.Cookie);
+            if (string.IsNullOrEmpty(ticket))
+            {
+                // Only an outright rejection (401/403) may mark the account invalid — a 429 from
+                // launching several accounts at once must not condemn them all.
+                var (identity, rejected) = await RobloxApi.GetAuthenticatedUserDetailedAsync(acc.Cookie);
+                if (identity == null && rejected)
+                {
+                    acc.MarkValidated(false);
+                    try { _store?.Save(); } catch { }
+                    return LaunchResult.Fail(L.T("Launch.CookieExpired"), retryable: false);
+                }
+                if (identity == null)
+                    return LaunchResult.Fail(L.T("Launch.Unreachable", error));
 
-            try { PluginService.RaiseLaunched(acc, target.PlaceId, jobId); } catch { }
-            if (settings.ToastOnLaunch)
-                ToastService.Success(L.T("Toast.Launched.Title"), L.T("Toast.Launched.Body", acc.DisplayNameOrUser));
-            if (settings.NotifyOnConnect && WebhookService.Configured)
-                WebhookService.Connected(acc, target.PlaceId, jobId);
-            AuditLogService.Log(AuditLogService.Category.Launch, $"Launched {acc.DisplayNameOrUser} into {target}");
-            return LaunchResult.Ok(client);
+                acc.MarkValidated(true);
+                return LaunchResult.Fail(L.T("Launch.NoTicket", error));
+            }
+            acc.MarkValidated(true);
+            PersistRotatedCookie(acc, rotated);
+
+            if (settings.AutoCloseLastProcess) CloseLast(acc);
+
+            long launchTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            // Sanitise a pasted Job ID: stray whitespace, quotes and commas from copy-paste.
+            string? jobId = target.JobId?.Trim().Trim('"', '\'', ',', ' ');
+            if (string.IsNullOrWhiteSpace(jobId)) jobId = null;
+            target = target with { JobId = jobId };
+
+            string uri = "roblox-player:1"
+                + "+launchmode:play"
+                + $"+gameinfo:{ticket}"
+                + $"+launchtime:{launchTime}"
+                + $"+placelauncherurl:{HttpUtility.UrlEncode(PlaceLauncherUrl(target, tracker))}"
+                + $"+browsertrackerid:{tracker}"
+                + "+robloxLocale:en_us+gameLocale:en_us+channel:+LaunchExp:InApp";
+
+            RobloxSingletonService.SweepBeforeLaunch();
+
+            try
+            {
+                // Only clients that appear after this instant can belong to this launch. Backdated a
+                // little: the protocol handler may have spawned the client before Process.Start returns.
+                DateTime launchedAt = DateTime.Now.AddSeconds(-2);
+
+                using (Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true })) { }
+                acc.LastUse = DateTime.Now;
+
+                _ = Task.Run(async () =>
+                {
+                    // Presence flips to "In Game" a few seconds after the join; poll twice so the
+                    // dashboard catches it quickly.
+                    await Task.Delay(4000);
+                    try { await PresenceService.PollNowAsync(); } catch { }
+                    await Task.Delay(6000);
+                    try { await PresenceService.PollNowAsync(); } catch { }
+                });
+
+                var client = Task.Run(() => AttributeClientAsync(acc, target, profile, launchedAt));
+                ReleaseAfter(client);
+                handedOff = true;
+
+                try { PluginService.RaiseLaunched(acc, target.PlaceId, jobId); } catch { }
+                if (settings.ToastOnLaunch)
+                    ToastService.Success(L.T("Toast.Launched.Title"), L.T("Toast.Launched.Body", acc.DisplayNameOrUser));
+                if (settings.NotifyOnConnect && WebhookService.Configured)
+                    WebhookService.Connected(acc, target.PlaceId, jobId);
+                AuditLogService.Log(AuditLogService.Category.Launch, $"Launched {acc.DisplayNameOrUser} into {target}");
+                return LaunchResult.Ok(client);
+            }
+            catch (Exception ex)
+            {
+                return LaunchResult.Fail(ExplainLaunchFailure(ex), retryable: false);
+            }
         }
-        catch (Exception ex)
-        {
-            return LaunchResult.Fail(ExplainLaunchFailure(ex), retryable: false);
-        }
+        finally { if (!handedOff) _launchGate.Release(); }
     }
 
     /// <summary>
@@ -198,8 +221,7 @@ public static class LauncherService
     /// a pending Roblox update, a slow disk) the client can take far longer than a few seconds to
     /// exist, and a single miss meant no Anti-AFK, crash watchdog or RAM cap for it.
     /// </summary>
-    private static async Task<int> AttributeClientAsync(Account acc, JoinTarget target, string? profile, DateTime launchedAt,
-        string? gameBefore = null)
+    private static async Task<int> AttributeClientAsync(Account acc, JoinTarget target, string? profile, DateTime launchedAt)
     {
         await Task.Delay(4000);
 
@@ -213,43 +235,31 @@ public static class LauncherService
         if (pid != 0)
         {
             _lastProcess[acc.UserId] = pid;
-            if (PerformanceProfiles.Minimizes(profile, SettingsService.Current.UltraLowAfk))
-                _ = MinimizeWhenInGameAsync(acc, pid, gameBefore);
+            if (SettingsService.Current.ResizeClientWindows) _ = PlaceWindowAsync(pid);
         }
         else DiagnosticsService.Warn("launcher", $"No client could be attributed to {acc.DisplayNameOrUser} within 34s of launch");
         return pid;
     }
 
     /// <summary>
-    /// Minimizes a freshly launched client once it has joined its game. Roblox stops loading while
-    /// its window is minimized, so minimizing on the splash screen left the client stuck until someone
-    /// restored it. "Joined" is the account's presence turning In Game — a fresh value, not one left
-    /// over from the session before — plus a short settle. Without that signal (presence switched
-    /// off, or never reported within 5 minutes) the client is left as it is.
+    /// Sizes and places a new client's window as soon as it has one, and once more a minute later:
+    /// the client can resize itself as it finishes loading. Unlike minimizing, a small window keeps
+    /// loading and rendering, so the client stays connected.
     /// </summary>
-    /// <param name="gameBefore">Game id presence reported before the launch when it already said In Game; null otherwise.</param>
-    private static async Task MinimizeWhenInGameAsync(Account acc, int pid, string? gameBefore)
+    private static async Task PlaceWindowAsync(int pid)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(5);
-        DateTime? windowSince = null;
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(2);
         while (DateTime.UtcNow < deadline)
         {
-            await Task.Delay(3000);
-            if (!ProcessRegistry.All.Any(t => t.Pid == pid)) return;          // closed meanwhile
-            if (ProcessRegistry.WindowHandle(pid) == IntPtr.Zero) continue;   // still starting
-            windowSince ??= DateTime.UtcNow;
-
-            if (acc.Presence != PresenceStatus.InGame) continue;
-            // In game already before the launch and still the same server: presence may simply not
-            // have caught up. Give loading a generous minute and a half instead of trusting it.
-            bool fresh = gameBefore == null || (acc.GameId ?? "") != gameBefore;
-            var settle = fresh ? TimeSpan.FromSeconds(15) : TimeSpan.FromSeconds(90);
-            if (DateTime.UtcNow - windowSince.Value < settle) continue;
-
-            InstanceControlService.Minimize(pid);
-            return;
+            await Task.Delay(1000);
+            if (!ProcessRegistry.All.Any(t => t.Pid == pid)) return;   // closed meanwhile
+            if (InstanceControlService.ShrinkAndPlace(pid, place: true))
+            {
+                await Task.Delay(TimeSpan.FromSeconds(60));
+                InstanceControlService.ShrinkAndPlace(pid, place: false);
+                return;
+            }
         }
-        DiagnosticsService.Log("launcher", $"Left {acc.DisplayNameOrUser}'s client open: it never showed as in game (minimizing earlier stops Roblox loading)");
     }
 
     /// <summary>Options for <see cref="LaunchBatchAsync"/>.</summary>
@@ -340,40 +350,49 @@ public static class LauncherService
         EnsureMultiInstance(SettingsService.Current.EnableMultiInstance);
         string tracker = EnsureTrackerId(acc);
 
-        var (ticket, rotated, error) = await RobloxApi.GetAuthTicketDetailedAsync(acc.Cookie);
-        if (string.IsNullOrEmpty(ticket))
-        {
-            var (identity, rejected) = await RobloxApi.GetAuthenticatedUserDetailedAsync(acc.Cookie);
-            if (identity == null && rejected)
-            {
-                acc.MarkValidated(false);
-                return LaunchResult.Fail(L.T("Launch.CookieExpired"));
-            }
-            return LaunchResult.Fail(L.T("Launch.NoTicket", error));
-        }
-        acc.MarkValidated(true);
-        PersistRotatedCookie(acc, rotated);
-
-        long launchTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        string uri = "roblox-player:1+launchmode:app"
-            + $"+gameinfo:{ticket}+launchtime:{launchTime}+browsertrackerid:{tracker}"
-            + "+robloxLocale:en_us+gameLocale:en_us+channel:+LaunchExp:InApp";
+        await _launchGate.WaitAsync();
+        bool handedOff = false;
         try
         {
-            DateTime launchedAt = DateTime.Now.AddSeconds(-2);
-            using (Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true })) { }
-            acc.LastUse = DateTime.Now;
-            _ = Task.Run(async () =>
+            var (ticket, rotated, error) = await RobloxApi.GetAuthTicketDetailedAsync(acc.Cookie);
+            if (string.IsNullOrEmpty(ticket))
             {
-                await Task.Delay(5000);
-                try { await PresenceService.PollNowAsync(); } catch { }
-            });
-            var client = Task.Run(() => AttributeClientAsync(acc, new JoinTarget(0), null, launchedAt));
-            if (SettingsService.Current.ToastOnLaunch)
-                ToastService.Success(L.T("Toast.Launched.Title"), L.T("Toast.Launched.Body", acc.DisplayNameOrUser));
-            return LaunchResult.Ok(client);
+                var (identity, rejected) = await RobloxApi.GetAuthenticatedUserDetailedAsync(acc.Cookie);
+                if (identity == null && rejected)
+                {
+                    acc.MarkValidated(false);
+                    return LaunchResult.Fail(L.T("Launch.CookieExpired"));
+                }
+                return LaunchResult.Fail(L.T("Launch.NoTicket", error));
+            }
+            acc.MarkValidated(true);
+            PersistRotatedCookie(acc, rotated);
+
+            long launchTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            string uri = "roblox-player:1+launchmode:app"
+                + $"+gameinfo:{ticket}+launchtime:{launchTime}+browsertrackerid:{tracker}"
+                + "+robloxLocale:en_us+gameLocale:en_us+channel:+LaunchExp:InApp";
+            RobloxSingletonService.SweepBeforeLaunch();
+            try
+            {
+                DateTime launchedAt = DateTime.Now.AddSeconds(-2);
+                using (Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true })) { }
+                acc.LastUse = DateTime.Now;
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(5000);
+                    try { await PresenceService.PollNowAsync(); } catch { }
+                });
+                var client = Task.Run(() => AttributeClientAsync(acc, new JoinTarget(0), null, launchedAt));
+                ReleaseAfter(client);
+                handedOff = true;
+                if (SettingsService.Current.ToastOnLaunch)
+                    ToastService.Success(L.T("Toast.Launched.Title"), L.T("Toast.Launched.Body", acc.DisplayNameOrUser));
+                return LaunchResult.Ok(client);
+            }
+            catch (Exception ex) { return LaunchResult.Fail(ExplainLaunchFailure(ex)); }
         }
-        catch (Exception ex) { return LaunchResult.Fail(ExplainLaunchFailure(ex)); }
+        finally { if (!handedOff) _launchGate.Release(); }
     }
 
     private static void CloseLast(Account acc)
