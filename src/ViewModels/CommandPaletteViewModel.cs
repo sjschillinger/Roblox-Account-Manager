@@ -134,7 +134,7 @@ public class CommandPaletteViewModel : ObservableObject
         Action("Palette.LaunchSelected", "Icon.Play", () => { _main.SelectedIndex = Pages.Accounts; acc.LaunchCommand.Execute(null); });
         Action("Palette.RefreshAccounts", "Icon.Refresh", () => acc.RefreshAllCommand.Execute(null), "F5");
         Action("Palette.CheckSessions", "Icon.ShieldCheck", () => _main.Dashboard.ValidateAllCommand.Execute(null));
-        Action("Palette.CloseClients", "Icon.Stop", _main.CloseAllClients);
+        Action("Palette.CloseClients", "Icon.Stop", () => _main.CloseAllClients("user: Close all (command palette)"));
         Action("Palette.ArrangeWindows", "Icon.Grid", () => _main.Dashboard.ArrangeCommand.Execute(null));
         Action("Palette.ToggleTheme", "Icon.Moon", () => _main.ToggleThemeCommand.Execute(null));
         if (LockService.CanLock) Action("Palette.Lock", "Icon.Lock", () => LockService.Lock(), "Ctrl+L");

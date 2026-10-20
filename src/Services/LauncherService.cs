@@ -19,15 +19,53 @@ public static class LauncherService
     private static readonly SemaphoreSlim _launchGate = new(1, 1);
     private static readonly TimeSpan LaunchSettle = TimeSpan.FromSeconds(3);
 
-    /// <summary>Releases the launch gate once <paramref name="client"/> is attributed and has settled.</summary>
+    // The next launch need not wait longer than this for the previous client: it is recognised by
+    // its own tracker id and launch time, so a slow client can't be mistaken for the next one.
+    private static readonly TimeSpan GateWait = TimeSpan.FromSeconds(40);
+
+    /// <summary>Releases the launch gate once <paramref name="client"/> is found and has settled, or after <see cref="GateWait"/>.</summary>
     private static void ReleaseAfter(Task<int> client)
-        => _ = client.ContinueWith(async _ =>
+        => _ = Task.Run(async () =>
         {
-            try { await Task.Delay(LaunchSettle); } finally { _launchGate.Release(); }
-        }, TaskScheduler.Default);
+            try
+            {
+                await Task.WhenAny(client, Task.Delay(GateWait));
+                await Task.Delay(LaunchSettle);
+            }
+            finally { _launchGate.Release(); }
+        });
 
     private static AccountStore? _store;
-    public static void Init(AccountStore store) => _store = store;
+
+    public static void Init(AccountStore store)
+    {
+        _store = store;
+        EnsureUniqueTrackers(store);
+    }
+
+    /// <summary>
+    /// Every account needs its own tracker id: it is how a running client is tied to its account
+    /// (<see cref="ClientIdentity"/>). An imported or restored account can carry another's.
+    /// </summary>
+    private static void EnsureUniqueTrackers(AccountStore store)
+    {
+        var seen = new HashSet<string>();
+        bool changed = false;
+        foreach (var acc in store.Accounts)
+        {
+            if (string.IsNullOrEmpty(acc.BrowserTrackerId)) continue;
+            if (seen.Add(acc.BrowserTrackerId)) continue;
+            acc.BrowserTrackerId = "";
+            seen.Add(EnsureTrackerId(acc));
+            changed = true;
+            DiagnosticsService.Warn("launcher", $"{acc.DisplayNameOrUser} shared a tracker id with another account; gave it its own");
+        }
+        if (changed) { try { store.Save(); } catch { } }
+    }
+
+    /// <summary>The account whose tracker id this is, or null.</summary>
+    public static Account? AccountByTracker(string tracker)
+        => string.IsNullOrEmpty(tracker) ? null : _store?.Accounts.FirstOrDefault(a => a.BrowserTrackerId == tracker);
 
     /// <summary>
     /// Persists a cookie Roblox rotated during the auth-ticket call. Without this an account whose
@@ -52,9 +90,11 @@ public static class LauncherService
 
     public static string EnsureTrackerId(Account acc)
     {
-        if (string.IsNullOrEmpty(acc.BrowserTrackerId))
-            acc.BrowserTrackerId = Random.Shared.Next(100000, 175000).ToString()
-                                 + Random.Shared.Next(100000, 900000).ToString();
+        while (string.IsNullOrEmpty(acc.BrowserTrackerId))
+        {
+            string id = Random.Shared.Next(100000, 175000).ToString() + Random.Shared.Next(100000, 900000).ToString();
+            if (AccountByTracker(id) == null) acc.BrowserTrackerId = id;
+        }
         return acc.BrowserTrackerId;
     }
 
@@ -68,6 +108,15 @@ public static class LauncherService
         /// the watchdog stops retrying a rejoin on those.
         /// </summary>
         public bool Retryable { get; init; } = true;
+
+        /// <summary>The account's cookie is missing or was rejected: nothing but the user can fix that.</summary>
+        public bool CookieProblem { get; init; }
+
+        /// <summary>The caller's <c>proceed</c> check said no; nothing was launched.</summary>
+        public bool Abandoned { get; init; }
+
+        /// <summary>The launch's timestamp (on the client's command line), once it was started.</summary>
+        public long LaunchTime { get; init; }
 
         /// <summary>
         /// Completes with the pid of the client this launch produced once it has been found, or 0 when
@@ -106,18 +155,35 @@ public static class LauncherService
 
     /// <param name="jobId">optional specific server</param>
     /// <param name="followUserId">optional user to follow into their game</param>
-    public static Task<LaunchResult> LaunchAsync(Account acc, long placeId, string? jobId = null, long followUserId = 0,
+    public static Task<LaunchResult> LaunchAsync(Account acc, long placeId, string cause, string? jobId = null, long followUserId = 0,
         string? privateLinkCode = null, string? accessCode = null)
-        => LaunchAsync(acc, new JoinTarget(placeId, jobId, followUserId, privateLinkCode, accessCode));
+        => LaunchAsync(acc, new JoinTarget(placeId, jobId, followUserId, privateLinkCode, accessCode), cause);
 
+    /// <param name="cause">Who launched and why, for the event log (e.g. "user: Launch button", "preset: Grinders").</param>
     /// <param name="profile">Performance profile for this client (<see cref="PerformanceProfiles"/>); null/empty = normal.</param>
-    public static async Task<LaunchResult> LaunchAsync(Account acc, JoinTarget target, string? profile = null)
+    /// <param name="proceed">
+    /// Asked once the launch's turn has come and again just before the client starts; false abandons
+    /// the launch (the watchdog's relaunch, when someone else launched the account meanwhile).
+    /// </param>
+    public static async Task<LaunchResult> LaunchAsync(Account acc, JoinTarget target, string cause, string? profile = null, Func<bool>? proceed = null)
+    {
+        var r = await LaunchCoreAsync(acc, target, profile, proceed);
+        if (r.Success)
+            EventLog.Write("LAUNCH", EventLog.Who(acc), ("launch", r.LaunchTime), ("target", target.ToString()), ("profile", profile), ("cause", cause));
+        else
+            EventLog.Write(r.Abandoned ? "LAUNCH-SKIPPED" : "LAUNCH-FAILED", EventLog.Who(acc), ("target", target.ToString()), ("cause", cause),
+                           ("why", r.Abandoned ? "the account was launched, found running or stopped meanwhile" : r.Message));
+        return r;
+    }
+
+    private static async Task<LaunchResult> LaunchCoreAsync(Account acc, JoinTarget target, string? profile, Func<bool>? proceed)
     {
         if (LockService.IsLocked) return LaunchResult.Fail(L.T("Lock.Blocked"), retryable: false);
-        if (string.IsNullOrEmpty(acc.Cookie)) return LaunchResult.Fail(L.T("Launch.NoCookie"), retryable: false);
+        if (string.IsNullOrEmpty(acc.Cookie)) return new LaunchResult { Message = L.T("Launch.NoCookie"), Retryable = false, CookieProblem = true };
         if (target.Kind != JoinKind.FollowUser && target.PlaceId <= 0) return LaunchResult.Fail(L.T("Launch.NeedPlace"), retryable: false);
 
         var settings = SettingsService.Current;
+        await WatchdogService.WaitForRobloxUpdateAsync();
         EnsureMultiInstance(settings.EnableMultiInstance);
 
         string tracker = EnsureTrackerId(acc);
@@ -126,6 +192,8 @@ public static class LauncherService
         bool handedOff = false;
         try
         {
+            if (proceed != null && !proceed()) return new LaunchResult { Message = "abandoned", Retryable = false, Abandoned = true };
+
             // Frame-rate cap, FastFlags, the profile and this account's own overrides, before the process
             // starts. Inside the gate: two launches writing the flag files at once failed with "file in use".
             try
@@ -147,7 +215,7 @@ public static class LauncherService
                 {
                     acc.MarkValidated(false);
                     try { _store?.Save(); } catch { }
-                    return LaunchResult.Fail(L.T("Launch.CookieExpired"), retryable: false);
+                    return new LaunchResult { Message = L.T("Launch.CookieExpired"), Retryable = false, CookieProblem = true };
                 }
                 if (identity == null)
                     return LaunchResult.Fail(L.T("Launch.Unreachable", error));
@@ -175,7 +243,9 @@ public static class LauncherService
                 + $"+browsertrackerid:{tracker}"
                 + "+robloxLocale:en_us+gameLocale:en_us+channel:+LaunchExp:InApp";
 
+            WatchdogService.ClearBeforeLaunch();
             RobloxSingletonService.SweepBeforeLaunch();
+            if (proceed != null && !proceed()) return new LaunchResult { Message = "abandoned", Retryable = false, Abandoned = true };
 
             try
             {
@@ -196,9 +266,10 @@ public static class LauncherService
                     try { await PresenceService.PollNowAsync(); } catch { }
                 });
 
-                var client = Task.Run(() => AttributeClientAsync(acc, target, profile, launchedAt));
+                var client = Task.Run(() => AttributeClientAsync(acc, target, profile, launchTime, launchedAt));
                 ReleaseAfter(client);
                 handedOff = true;
+                WatchdogService.Launched(acc, target, profile, launchTime);
 
                 try { PluginService.RaiseLaunched(acc, target.PlaceId, jobId); } catch { }
                 if (settings.ToastOnLaunch)
@@ -206,7 +277,7 @@ public static class LauncherService
                 if (settings.NotifyOnConnect && WebhookService.Configured)
                     WebhookService.Connected(acc, target.PlaceId, jobId);
                 AuditLogService.Log(AuditLogService.Category.Launch, $"Launched {acc.DisplayNameOrUser} into {target}");
-                return LaunchResult.Ok(client);
+                return new LaunchResult { Success = true, Message = L.T("Launch.Launched"), Client = client, LaunchTime = launchTime };
             }
             catch (Exception ex)
             {
@@ -217,27 +288,38 @@ public static class LauncherService
     }
 
     /// <summary>
-    /// Binds the client this launch produced to its account. Retried: on a cold start (shader cache,
-    /// a pending Roblox update, a slow disk) the client can take far longer than a few seconds to
-    /// exist, and a single miss meant no Anti-AFK, crash watchdog or RAM cap for it.
+    /// Binds the client this launch produced to its account, recognised by the account's tracker id and
+    /// this launch's timestamp on its command line. Looked for during <see cref="RecoverySlot.LaunchTimeout"/>:
+    /// on a cold start (shader cache, a pending Roblox update, a slow disk) the client can take a long
+    /// time to exist. A launch that never produces one is retried by the watchdog.
     /// </summary>
-    private static async Task<int> AttributeClientAsync(Account acc, JoinTarget target, string? profile, DateTime launchedAt)
+    private static async Task<int> AttributeClientAsync(Account acc, JoinTarget target, string? profile, long launchTime, DateTime launchedAt)
     {
-        await Task.Delay(4000);
+        await Task.Delay(2000);
 
         int pid = 0;
-        for (int attempt = 0; attempt < 15 && pid == 0; attempt++)
+        var deadline = DateTime.UtcNow + RecoverySlot.LaunchTimeout;
+        while (pid == 0 && DateTime.UtcNow < deadline)
         {
-            try { pid = ProcessRegistry.RegisterNewest(acc, target, profile, launchedAt); } catch { }
-            if (pid == 0) await Task.Delay(2000);
+            try { pid = ProcessRegistry.Register(acc, target, profile, launchTime, launchedAt); } catch { }
+            if (pid == 0) await Task.Delay(1000);
         }
 
         if (pid != 0)
         {
             _lastProcess[acc.UserId] = pid;
+            DiagnosticsService.Log("launcher", $"{acc.DisplayNameOrUser}'s client is pid {pid}");
+            var start = ProcessRegistry.All.FirstOrDefault(t => t.Pid == pid)?.StartTimeLocal ?? default;
+            bool exact = ProcessCommandLine.IdentityOf(pid, start)?.LaunchTime == launchTime;
+            EventLog.Write("MATCHED", EventLog.Who(acc), ("pid", pid), ("launch", launchTime),
+                           ("how", exact ? "tracker id and launch time on its command line" : "start time (command line unreadable)"));
             if (SettingsService.Current.ResizeClientWindows) _ = PlaceWindowAsync(pid);
         }
-        else DiagnosticsService.Warn("launcher", $"No client could be attributed to {acc.DisplayNameOrUser} within 34s of launch");
+        else
+        {
+            DiagnosticsService.Warn("launcher", $"No client appeared for {acc.DisplayNameOrUser} within {(int)RecoverySlot.LaunchTimeout.TotalMinutes} min of launch");
+            EventLog.Write("NO-CLIENT", EventLog.Who(acc), ("launch", launchTime), ("waited", EventLine.Duration(RecoverySlot.LaunchTimeout)));
+        }
         return pid;
     }
 
@@ -263,7 +345,8 @@ public static class LauncherService
     }
 
     /// <summary>Options for <see cref="LaunchBatchAsync"/>.</summary>
-    public sealed record BatchOptions(int DelaySeconds, int RandomDelaySeconds = 0, string? Profile = null);
+    /// <param name="Cause">Who started the batch, for the event log.</param>
+    public sealed record BatchOptions(int DelaySeconds, int RandomDelaySeconds = 0, string? Profile = null, string Cause = "batch launch");
 
     /// <param name="NotStarted">Accounts skipped because the batch was stopped.</param>
     public sealed record BatchResult(int Launched, int Failed, IReadOnlyList<string> Errors, int NotStarted = 0);
@@ -292,7 +375,7 @@ public static class LauncherService
             onLaunching?.Invoke(acc, i);
 
             LaunchResult r;
-            try { r = await LaunchAsync(acc, target, options.Profile); }
+            try { r = await LaunchAsync(acc, target, options.Cause, options.Profile); }
             catch (Exception ex)
             {
                 DiagnosticsService.Warn("launcher", $"Launch of {acc.DisplayNameOrUser} threw", ex);
@@ -344,7 +427,7 @@ public static class LauncherService
     }
 
     /// <summary>Opens the Roblox app itself (home screen), signed in as this account — no game.</summary>
-    public static async Task<LaunchResult> OpenRobloxAppAsync(Account acc)
+    public static async Task<LaunchResult> OpenRobloxAppAsync(Account acc, string cause)
     {
         if (LockService.IsLocked) return LaunchResult.Fail(L.T("Lock.Blocked"));
         EnsureMultiInstance(SettingsService.Current.EnableMultiInstance);
@@ -372,6 +455,7 @@ public static class LauncherService
             string uri = "roblox-player:1+launchmode:app"
                 + $"+gameinfo:{ticket}+launchtime:{launchTime}+browsertrackerid:{tracker}"
                 + "+robloxLocale:en_us+gameLocale:en_us+channel:+LaunchExp:InApp";
+            WatchdogService.ClearBeforeLaunch();
             RobloxSingletonService.SweepBeforeLaunch();
             try
             {
@@ -383,11 +467,12 @@ public static class LauncherService
                     await Task.Delay(5000);
                     try { await PresenceService.PollNowAsync(); } catch { }
                 });
-                var client = Task.Run(() => AttributeClientAsync(acc, new JoinTarget(0), null, launchedAt));
+                var client = Task.Run(() => AttributeClientAsync(acc, new JoinTarget(0), null, launchTime, launchedAt));
                 ReleaseAfter(client);
                 handedOff = true;
                 if (SettingsService.Current.ToastOnLaunch)
                     ToastService.Success(L.T("Toast.Launched.Title"), L.T("Toast.Launched.Body", acc.DisplayNameOrUser));
+                EventLog.Write("LAUNCH", EventLog.Who(acc), ("launch", launchTime), ("target", "home screen"), ("cause", cause));
                 return LaunchResult.Ok(client);
             }
             catch (Exception ex) { return LaunchResult.Fail(ExplainLaunchFailure(ex)); }
@@ -395,27 +480,31 @@ public static class LauncherService
         finally { if (!handedOff) _launchGate.Release(); }
     }
 
+    /// <summary>Closes the account's running clients before it launches again: one account, one client.</summary>
     private static void CloseLast(Account acc)
     {
-        if (!_lastProcess.TryGetValue(acc.UserId, out int pid)) return;
-        try
+        var pids = ProcessRegistry.ForUser(acc.UserId).Where(t => !t.IsExternal).Select(t => t.Pid).ToHashSet();
+        if (_lastProcess.TryRemove(acc.UserId, out int last)) pids.Add(last);
+        foreach (int pid in pids)
         {
-            using var p = Process.GetProcessById(pid);
-            if (!p.HasExited && p.ProcessName.StartsWith("RobloxPlayer", StringComparison.OrdinalIgnoreCase))
+            try
             {
-                // A deliberate close, not a crash: flag it so the watchdog does not answer it with an
-                // auto-rejoin (the session is still booked as playtime).
-                ProcessRegistry.MarkClosing(pid);
-                p.CloseMainWindow();
-                if (!p.WaitForExit(1500)) p.Kill();
+                using var p = Process.GetProcessById(pid);
+                if (!p.HasExited && p.ProcessName.StartsWith("RobloxPlayer", StringComparison.OrdinalIgnoreCase))
+                {
+                    // A deliberate close, not a crash: flag it so the watchdog does not answer it with an
+                    // auto-rejoin (the session is still booked as playtime).
+                    ProcessRegistry.MarkClosing(pid, "launching the same account again (close previous client)");
+                    p.CloseMainWindow();
+                    if (!p.WaitForExit(1500)) p.Kill();
+                }
             }
+            catch { }
         }
-        catch { }
-        _lastProcess.TryRemove(acc.UserId, out _);
     }
 
     /// <summary>Closes every running Roblox client and returns how many were closed.</summary>
-    public static int CloseAllClients()
+    public static int CloseAllClients(string cause)
     {
         int closed = 0;
         foreach (var p in Process.GetProcessesByName("RobloxPlayerBeta"))
@@ -425,7 +514,7 @@ public static class LauncherService
                 if (!p.HasExited)
                 {
                     // Deliberate close: flag it so the watchdog does not auto-rejoin it.
-                    ProcessRegistry.MarkClosing(p.Id);
+                    ProcessRegistry.MarkClosing(p.Id, cause);
                     p.CloseMainWindow();
                     if (!p.WaitForExit(1500)) p.Kill();
                     closed++;

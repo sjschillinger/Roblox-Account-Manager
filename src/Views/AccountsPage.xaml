@@ -697,6 +697,8 @@
                                              IsChecked="{Binding InspectorTab, Converter={StaticResource EqualsToBool}, ConverterParameter=Details}" />
                                 <RadioButton GroupName="inspectorTab" Style="{StaticResource Tab}" Content="{DynamicResource Str.Inspector.Tab.Security}"
                                              IsChecked="{Binding InspectorTab, Converter={StaticResource EqualsToBool}, ConverterParameter=Security}" />
+                                <RadioButton GroupName="inspectorTab" Style="{StaticResource Tab}" Content="{DynamicResource Str.Inspector.Tab.Automation}"
+                                             IsChecked="{Binding InspectorTab, Converter={StaticResource EqualsToBool}, ConverterParameter=Automation}" />
                                 <RadioButton GroupName="inspectorTab" Style="{StaticResource Tab}" Content="{DynamicResource Str.Inspector.Tab.Advanced}"
                                              IsChecked="{Binding InspectorTab, Converter={StaticResource EqualsToBool}, ConverterParameter=Advanced}" />
                             </StackPanel>
@@ -817,10 +819,6 @@
                                 </StackPanel>
 
                                 <Border Style="{StaticResource Divider}" Margin="0,18,0,6" />
-                                <ctl:SettingItem Padding="0,10" Title="{DynamicResource Str.Inspector.AutoRejoin}"
-                                                 Description="{DynamicResource Str.Inspector.AutoRejoinDesc}">
-                                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Selected.AutoRejoin}" Click="Detail_Changed" />
-                                </ctl:SettingItem>
                                 <ctl:SettingItem Padding="0,10" Title="{DynamicResource Str.Inspector.PinTitle}"
                                                  Description="{DynamicResource Str.Inspector.PinDesc}">
                                     <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Selected.IsFavorite}" Click="Detail_Changed" />
@@ -916,6 +914,68 @@
                             </StackPanel>
 
                             <!-- ===== Advanced ===== -->
+                            <!-- ===== Automation: this account's own values ===== -->
+                            <StackPanel Visibility="{Binding InspectorTab, Converter={StaticResource EqualsToVis}, ConverterParameter=Automation}">
+                                <TextBlock Text="{DynamicResource Str.Overrides.Intro}" Style="{StaticResource Text.Caption}" TextWrapping="Wrap" Margin="0,0,0,12" />
+
+                                <TextBlock Text="{DynamicResource Str.Overrides.Recovery}" Style="{StaticResource Text.Label}" />
+                                <ctl:SettingItem Padding="0,10" Title="{DynamicResource Str.Inspector.AutoRejoin}"
+                                                 Description="{DynamicResource Str.Inspector.AutoRejoinDesc}">
+                                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Selected.AutoRejoin}" Click="Detail_Changed" />
+                                </ctl:SettingItem>
+                                <ctl:SettingItem Padding="0,10" Title="{DynamicResource Str.Overrides.Disconnect}" Description="{DynamicResource Str.Overrides.Disconnect.Desc}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBox Style="{StaticResource Input.Number}" Width="150" Text="{Binding OverridesEditor.DisconnectMinutes, UpdateSourceTrigger=LostFocus}"
+                                                 ctl:Ui.Placeholder="{Binding OverridesEditor.DisconnectGlobal}" />
+                                        <TextBlock Text="{DynamicResource Str.Common.Unit.Minutes}" Style="{StaticResource Text.Caption}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ctl:SettingItem>
+                                <ctl:SettingItem Padding="0,10" Title="{DynamicResource Str.Overrides.Restart}" Description="{DynamicResource Str.Overrides.Restart.Desc}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBox Style="{StaticResource Input.Number}" Width="150" Text="{Binding OverridesEditor.RestartMinutes, UpdateSourceTrigger=LostFocus}"
+                                                 ctl:Ui.Placeholder="{Binding OverridesEditor.RestartGlobal}" />
+                                        <TextBlock Text="{DynamicResource Str.Common.Unit.Minutes}" Style="{StaticResource Text.Caption}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ctl:SettingItem>
+                                <ctl:SettingItem Padding="0,10" Title="{DynamicResource Str.Overrides.RamGrowth}" Description="{DynamicResource Str.Overrides.RamGrowth.Desc}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBox Style="{StaticResource Input.Number}" Width="150" Text="{Binding OverridesEditor.RamGrowth, UpdateSourceTrigger=LostFocus}"
+                                                 ctl:Ui.Placeholder="{Binding OverridesEditor.RamGrowthGlobal}" />
+                                        <TextBlock Text="×" Style="{StaticResource Text.Caption}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ctl:SettingItem>
+
+                                <Border Style="{StaticResource Divider}" Margin="0,12,0,16" />
+                                <TextBlock Text="{DynamicResource Str.AntiAfk.Section}" Style="{StaticResource Text.Label}" />
+                                <ctl:SettingItem Padding="0,10" Title="{DynamicResource Str.AntiAfk.Title}">
+                                    <ComboBox Width="190" ItemsSource="{Binding OverridesEditor.AfkModeChoices}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                              SelectedValue="{Binding OverridesEditor.AfkMode}" />
+                                </ctl:SettingItem>
+                                <ctl:SettingItem Padding="0,10" Title="{DynamicResource Str.AntiAfk.Interval}" Description="{DynamicResource Str.Overrides.AfkInterval.Desc}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBox Style="{StaticResource Input.Number}" Width="150" Text="{Binding OverridesEditor.AfkInterval, UpdateSourceTrigger=LostFocus}"
+                                                 ctl:Ui.Placeholder="{Binding OverridesEditor.AfkIntervalGlobal}" />
+                                        <TextBlock Text="{DynamicResource Str.Common.Unit.Minutes}" Style="{StaticResource Text.Caption}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ctl:SettingItem>
+                                <ctl:SettingItem Padding="0,10" Title="{DynamicResource Str.AntiAfk.Key}">
+                                    <ComboBox Width="190" ItemsSource="{Binding OverridesEditor.AfkKeyChoices}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                              SelectedValue="{Binding OverridesEditor.AfkKey}" />
+                                </ctl:SettingItem>
+
+                                <Border Style="{StaticResource Divider}" Margin="0,12,0,16" />
+                                <TextBlock Text="{DynamicResource Str.Overrides.Destination}" Style="{StaticResource Text.Label}" />
+                                <TextBlock Text="{DynamicResource Str.Overrides.Destination.Desc}" Style="{StaticResource Text.Caption}" TextWrapping="Wrap" Margin="0,0,0,10" />
+                                <TextBox Text="{Binding OverridesEditor.DefaultPlace, UpdateSourceTrigger=LostFocus}" ctl:Ui.Placeholder="{DynamicResource Str.Overrides.Destination.Place}" />
+                                <TextBox Margin="0,8,0,0" Text="{Binding OverridesEditor.DefaultServer, UpdateSourceTrigger=LostFocus}" ctl:Ui.Placeholder="{DynamicResource Str.Overrides.Destination.Server}" />
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <Button Style="{StaticResource Btn.Secondary}" Content="{DynamicResource Str.Overrides.UseLaunchBar}" Command="{Binding OverridesEditor.UseLaunchBarCommand}" />
+                                </StackPanel>
+
+                                <Border Style="{StaticResource Divider}" Margin="0,16,0,12" />
+                                <Button Style="{StaticResource Btn.Ghost}" HorizontalAlignment="Left" Content="{DynamicResource Str.Overrides.ClearAll}" Command="{Binding OverridesEditor.ClearCommand}" />
+                            </StackPanel>
+
                             <StackPanel Visibility="{Binding InspectorTab, Converter={StaticResource EqualsToVis}, ConverterParameter=Advanced}">
                                 <TextBlock Text="{DynamicResource Str.Inspector.Proxy}" Style="{StaticResource Text.Label}" />
                                 <TextBlock Text="{DynamicResource Str.Inspector.ProxyDesc}" Style="{StaticResource Text.Caption}" Margin="0,0,0,10" />

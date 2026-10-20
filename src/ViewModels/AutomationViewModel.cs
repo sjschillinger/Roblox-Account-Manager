@@ -636,7 +636,7 @@ public class AutomationViewModel : ObservableObject
         PresetService.RunResult r;
         try
         {
-            r = await PresetService.LaunchAsync(item.Model,
+            r = await PresetService.LaunchAsync(item.Model, "user: Run preset",
                 onLaunching: (a, i) => _main.SetStatus(L.T("Launch.LaunchingOf", a.DisplayNameOrUser, i + 1, item.Model.Aliases.Count)),
                 onWaiting: left => _main.SetStatus(left > 0 ? L.T("Launch.NextIn", left) : L.T("Automation.Preset.Running", item.Name)),
                 ct: _presetCts.Token);
@@ -701,7 +701,7 @@ public class AutomationViewModel : ObservableObject
             if (preset != null) await RunPresetAsync(Presets.FirstOrDefault(p => p.Model == preset));
             else if (item.Account is { } acc && item.Model.PlaceId > 0)
             {
-                var r = await LauncherService.LaunchAsync(acc, item.Model.PlaceId);
+                var r = await LauncherService.LaunchAsync(acc, item.Model.PlaceId, $"user: Run now on schedule '{item.Model.Name}'");
                 _main.SetStatus(r.Success ? L.T("Status.Launched", acc.DisplayNameOrUser) : r.Message);
             }
             else _main.SetStatus(L.T("Automation.Schedule.Incomplete"));
@@ -716,11 +716,12 @@ public class AutomationViewModel : ObservableObject
                 bool everyone = preset == null && item.Account == null;
                 var clients = ProcessRegistry.All.Where(t => everyone || ids.Contains(t.UserId)).ToList();
                 _main.SetStatus(L.T("Automation.Schedule.Restarting"));
-                int back = await WatchdogService.RestartAllAsync(clients);
+                int back = await WatchdogService.RestartAllAsync(clients, $"user: Run now on schedule '{item.Model.Name}' (Restart)");
                 _main.SetStatus(back > 0 ? L.N("Status.RestartedClients", back) : L.T("Status.NoClients"));
                 return;
             }
-            int closed = await Task.Run(() => ids.Sum(InstanceControlService.CloseFor));
+            string cause = $"user: Run now on schedule '{item.Model.Name}' (Close)";
+            int closed = await Task.Run(() => ids.Sum(id => InstanceControlService.CloseFor(id, cause)));
             _main.SetStatus(closed > 0 ? L.N("Status.ClosedClients", closed) : L.T("Status.NoClients"));
         }
     }

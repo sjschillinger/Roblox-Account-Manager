@@ -72,19 +72,14 @@ public class SettingsViewModel : ObservableObject
     public ObservableCollection<SettingsCategory> Categories { get; } = new()
     {
         new() { Key = "General", IconKey = "Icon.Sliders" },
-        new() { Key = "Appearance", IconKey = "Icon.Palette" },
         new() { Key = "Launching", IconKey = "Icon.Rocket" },
-        new() { Key = "Graphics", IconKey = "Icon.Gauge" },
-        new() { Key = "Automation", IconKey = "Icon.Automation" },
-        new() { Key = "Hotkeys", IconKey = "Icon.Keyboard" },
-        new() { Key = "LiveData", IconKey = "Icon.Activity" },
-        new() { Key = "Browser", IconKey = "Icon.Browser" },
-        new() { Key = "Network", IconKey = "Icon.Globe" },
-        new() { Key = "Security", IconKey = "Icon.Shield" },
+        new() { Key = "KeepRunning", IconKey = "Icon.Activity" },
+        new() { Key = "AntiAfk", IconKey = "Icon.Automation" },
+        new() { Key = "Performance", IconKey = "Icon.Gauge" },
         new() { Key = "Notifications", IconKey = "Icon.Bell" },
-        new() { Key = "Integrations", IconKey = "Icon.Plug" },
-        new() { Key = "Updates", IconKey = "Icon.Download" },
-        new() { Key = "Diagnostics", IconKey = "Icon.Info" },
+        new() { Key = "AccountsSecurity", IconKey = "Icon.Shield" },
+        new() { Key = "Advanced", IconKey = "Icon.Plug" },
+        new() { Key = "UpdatesLogs", IconKey = "Icon.Download" },
     };
 
     public SettingsViewModel(MainViewModel main)
@@ -108,6 +103,7 @@ public class SettingsViewModel : ObservableObject
         RestartElevatedCommand = new RelayCommand(_ => RestartElevated());
         RunHealthCheckCommand = new AsyncRelayCommand(RunHealthCheckAsync);
         OpenDiagnosticsCommand = new RelayCommand(_ => DiagnosticsService.OpenLogFolder());
+        OpenEventLogCommand = new RelayCommand(_ => OpenEventLogFolder());
         CopyDiagnosticsCommand = new RelayCommand(_ =>
         {
             if (ClipboardService.CopyText(DiagnosticsService.BuildReport())) _main.SetStatus(L.T("Diagnostics.Copied"));
@@ -197,7 +193,15 @@ public class SettingsViewModel : ObservableObject
     public SettingsCategory SelectedCategory
     {
         get => _selectedCategory;
-        set { if (value != null && SetField(ref _selectedCategory, value)) OnPropertyChanged(nameof(SelectedKey)); }
+        set
+        {
+            if (value == null || !SetField(ref _selectedCategory, value)) return;
+            OnPropertyChanged(nameof(SelectedKey));
+            // Accounts' own values can have changed on the Accounts page meanwhile.
+            OnPropertyChanged(nameof(AfkOverridesText));
+            OnPropertyChanged(nameof(RecoveryOverridesText));
+            OnPropertyChanged(nameof(EventLogStatus));
+        }
     }
 
     public string SelectedKey => _selectedCategory.Key;
@@ -381,7 +385,7 @@ public class SettingsViewModel : ObservableObject
 
     private void RefreshSingletonState() => RefreshOnUi(nameof(MultiInstanceStatus), nameof(ShowElevatePrompt));
 
-    public bool AutoCloseLastProcess { get => S.AutoCloseLastProcess; set { S.AutoCloseLastProcess = value; Persist(); OnPropertyChanged(); } }
+    public bool AutoCloseLastProcess { get => S.AutoCloseLastProcess; set { S.AutoCloseLastProcess = value; Persist(); WatchdogService.Apply(); OnPropertyChanged(); } }
     public int AccountJoinDelay { get => S.AccountJoinDelay; set { S.AccountJoinDelay = Math.Clamp(value, 0, 600); Persist(); OnPropertyChanged(); } }
     public bool ShuffleLowestServer { get => S.ShuffleLowestServer; set { S.ShuffleLowestServer = value; Persist(); OnPropertyChanged(); } }
     public int ShufflePageCount { get => S.ShufflePageCount; set { S.ShufflePageCount = Math.Clamp(value, 1, 25); Persist(); OnPropertyChanged(); } }
@@ -512,7 +516,7 @@ public class SettingsViewModel : ObservableObject
 
     // ================================================================ Automation
 
-    public bool AntiAfkEnabled { get => S.AntiAfkEnabled; set { S.AntiAfkEnabled = value; Persist(); AntiAfkService.Apply(); OnPropertyChanged(); } }
+    public bool AntiAfkEnabled { get => S.AntiAfkEnabled; set { S.AntiAfkEnabled = value; Persist(); AntiAfkService.Apply(); WatchdogService.Apply(); OnPropertyChanged(); } }
     public int AntiAfkIntervalMinutes
     {
         get => S.AntiAfkIntervalMinutes;
@@ -548,18 +552,65 @@ public class SettingsViewModel : ObservableObject
     }
 
     public bool WatchdogEnabled { get => S.WatchdogEnabled; set { S.WatchdogEnabled = value; Persist(); WatchdogService.Apply(); OnPropertyChanged(); } }
-    public int WatchdogCheckSeconds { get => S.WatchdogCheckSeconds; set { S.WatchdogCheckSeconds = Math.Clamp(value, 5, 600); Persist(); WatchdogService.Apply(); OnPropertyChanged(); } }
-    public bool RejoinOnDisconnect { get => S.RejoinOnDisconnect; set { S.RejoinOnDisconnect = value; Persist(); OnPropertyChanged(); } }
-    public int DisconnectMinutes { get => S.DisconnectMinutes; set { S.DisconnectMinutes = Math.Clamp(value, 1, 60); Persist(); OnPropertyChanged(); } }
+    public bool RejoinOnDisconnect { get => S.RejoinOnDisconnect; set { S.RejoinOnDisconnect = value; Persist(); WatchdogService.Apply(); OnPropertyChanged(); } }
+    public int DisconnectMinutes { get => S.DisconnectMinutes; set { S.DisconnectMinutes = Math.Clamp(value, 1, 60); Persist(); WatchdogService.Apply(); OnPropertyChanged(); } }
     public bool RestartClientsEnabled { get => S.RestartClientsEnabled; set { S.RestartClientsEnabled = value; Persist(); WatchdogService.Apply(); OnPropertyChanged(); } }
-    public int RestartClientsMinutes { get => S.RestartClientsMinutes; set { S.RestartClientsMinutes = Math.Clamp(value, 30, 24 * 60); Persist(); OnPropertyChanged(); } }
+    public int RestartClientsMinutes { get => S.RestartClientsMinutes; set { S.RestartClientsMinutes = Math.Clamp(value, 30, 24 * 60); Persist(); WatchdogService.Apply(); OnPropertyChanged(); } }
+
+    /// <summary>Accounts with their own Anti-AFK / recovery values (shown on those pages), or empty.</summary>
+    public string AfkOverridesText => AccountSettings.AfkOverridesText;
+    public string RecoveryOverridesText => AccountSettings.RecoveryOverridesText;
+
+    // ---- event log ----
+    public bool EventLogEnabled
+    {
+        get => S.EventLogEnabled;
+        set
+        {
+            if (!value) EventLog.Write("MANAGER", "event log turned off");
+            S.EventLogEnabled = value;
+            Persist();
+            ClientLogWatcher.Apply();
+            if (value) EventLog.Write("MANAGER", "event log turned on", ("settings", EventLog.RecoverySettings()));
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(EventLogStatus));
+        }
+    }
+    public int EventLogDays { get => S.EventLogDays; set { S.EventLogDays = Math.Clamp(value, 1, 365); Persist(); EventLog.Trim(); OnPropertyChanged(); OnPropertyChanged(nameof(EventLogStatus)); } }
+
+    /// <summary>"3 files, 1.2 MB" for the event log folder.</summary>
+    public string EventLogStatus
+    {
+        get
+        {
+            try
+            {
+                var dir = new System.IO.DirectoryInfo(EventLog.Folder);
+                var files = dir.Exists ? dir.GetFiles("events-*.log") : Array.Empty<System.IO.FileInfo>();
+                double mb = files.Sum(f => f.Length) / 1024.0 / 1024.0;
+                return L.T("EventLog.Files.Desc", files.Length, mb.ToString("0.0"), EventLog.CapBytes / 1024 / 1024);
+            }
+            catch { return ""; }
+        }
+    }
+    public RelayCommand OpenEventLogCommand { get; }
 
     public bool RamMonitorEnabled { get => S.RamMonitorEnabled; set { S.RamMonitorEnabled = value; Persist(); RamMonitorService.Apply(); OnPropertyChanged(); OnPropertyChanged(nameof(RamStatus)); } }
     public int RamMonitorSeconds { get => S.RamMonitorSeconds; set { S.RamMonitorSeconds = Math.Clamp(value, 2, 600); Persist(); RamMonitorService.Apply(); OnPropertyChanged(); } }
     public bool AutoCloseOnHighRam { get => S.AutoCloseOnHighRam; set { S.AutoCloseOnHighRam = value; Persist(); OnPropertyChanged(); } }
     public int RamLimitMb { get => S.RamLimitMb; set { S.RamLimitMb = Math.Clamp(value, 256, 65536); Persist(); OnPropertyChanged(); } }
     public bool RestartOnRamGrowth { get => S.RestartOnRamGrowth; set { S.RestartOnRamGrowth = value; Persist(); RamMonitorService.Apply(); WatchdogService.Apply(); OnPropertyChanged(); } }
-    public double RamGrowthFactor { get => S.RamGrowthFactor; set { S.RamGrowthFactor = Math.Clamp(value, 1.2, 10); Persist(); OnPropertyChanged(); } }
+    public double RamGrowthFactor { get => S.RamGrowthFactor; set { S.RamGrowthFactor = Math.Clamp(value, 1.2, 10); Persist(); WatchdogService.Apply(); OnPropertyChanged(); } }
+
+    private static void OpenEventLogFolder()
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(EventLog.Folder);
+            using var explorer = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(EventLog.Folder) { UseShellExecute = true });
+        }
+        catch (Exception ex) { DiagnosticsService.Warn("diagnostics", "could not open the event log folder", ex); }
+    }
     public bool AutoTrimEnabled { get => S.AutoTrimEnabled; set { S.AutoTrimEnabled = value; Persist(); RamMonitorService.ApplyAutoTrim(); OnPropertyChanged(); } }
     public int AutoTrimMinutes { get => S.AutoTrimMinutes; set { S.AutoTrimMinutes = Math.Clamp(value, 5, 240); Persist(); RamMonitorService.ApplyAutoTrim(); OnPropertyChanged(); } }
     public RelayCommand TrimRamCommand { get; }

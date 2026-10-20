@@ -170,7 +170,7 @@ public class ServerBrowserViewModel : ObservableObject
         if (_placeId <= 0) return;
 
         _main.SetStatus(L.T("Launch.Launching", acc.DisplayNameOrUser));
-        var r = await LauncherService.LaunchAsync(acc, _placeId, server.Id);
+        var r = await LauncherService.LaunchAsync(acc, _placeId, "user: join from the server browser", server.Id);
         _main.SetStatus(r.Success ? L.T("Status.Launched", acc.DisplayNameOrUser) : r.Message);
         if (!r.Success) ToastService.Error(L.T("Launch.FailedTitle"), r.Message);
     }

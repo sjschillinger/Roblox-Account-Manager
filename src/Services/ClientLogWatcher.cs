@@ -7,8 +7,9 @@ namespace RobloxAccountManager.Services;
 /// <summary>
 /// Follows each tracked client's own log file and keeps a <see cref="ClientLogState"/> per pid.
 ///
-/// Roblox writes one log per client process, created as the process starts. A client is matched
-/// to the Player log created closest to its start time (within a few seconds) that no other client
+/// Roblox writes one log per client process, created as the process starts, and keeps it open while
+/// it runs. A client is matched to the Player log it has open (asked of Windows, see <see cref="FileUsers"/>),
+/// or, when Windows can't say, to the one created closest to its start time that no other client
 /// holds; once the log names the account (on join), a mismatch drops the match and the log is
 /// remembered as that other account's, so the next tick tries the next candidate instead of the
 /// same file again. Crash-handler and installer logs are never matched: they never show a join, and
@@ -38,14 +39,17 @@ public static class ClientLogWatcher
     private static string LogDir => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Roblox", "logs");
 
+    /// <summary>True while at least one client has its log matched: logs are being written and read, so a client without one is the odd one out.</summary>
+    public static bool Working => !_byPid.IsEmpty;
+
     /// <summary>The log's view of a client, or null when no log could be matched to it.</summary>
     public static ClientLogState? StateOf(int pid) => _byPid.TryGetValue(pid, out var f) ? f.State : null;
 
-    /// <summary>Follows the logs while something reads them: disconnect recovery, or Anti-AFK's loading help.</summary>
+    /// <summary>Follows the logs while something reads them: the watchdog, Anti-AFK's loading help, or the event log.</summary>
     public static void Apply()
     {
         var s = SettingsService.Current;
-        if ((s.WatchdogEnabled && s.RejoinOnDisconnect) || (s.AntiAfkEnabled && s.AntiAfkHelpLoading)) Start();
+        if (s.WatchdogEnabled || (AccountSettings.AnyAfkOn && s.AntiAfkHelpLoading) || s.EventLogEnabled) Start();
         else Stop();
     }
 
@@ -85,7 +89,12 @@ public static class ClientLogWatcher
                     if (f == null) continue;
                     _byPid[t.Pid] = f;
                 }
+                var before = (f.State.Phase, f.State.Reason);
                 Read(f);
+                if ((f.State.Phase, f.State.Reason) != before)
+                    EventLog.Write("STATE", EventLog.Who(t.Alias, t.UserId), ("pid", t.Pid), ("from", before.Phase), ("to", f.State.Phase),
+                                   ("reason", f.State.Reason > 0 ? f.State.Reason : null),
+                                   ("line", f.State.Phase == ClientPhase.Out ? f.State.LastDisconnectLine : null));
                 if (f.State.UserId != 0) _owner[f.Path] = f.State.UserId;
                 if (f.State.UserId != 0 && f.State.UserId != t.UserId)
                 {
@@ -97,6 +106,52 @@ public static class ClientLogWatcher
         }
         catch (Exception ex) { DiagnosticsService.Warn("logs", "Reading Roblox logs failed", ex); }
         finally { Interlocked.Exchange(ref _busy, 0); }
+    }
+
+    /// <summary>The log followed for a client, or null.</summary>
+    public static string? LogPathOf(int pid) => _byPid.TryGetValue(pid, out var f) ? f.Path : null;
+
+    /// <summary>
+    /// For a client that died soon after starting: the error lines Roblox wrote about it — in its own
+    /// log (<paramref name="ownLog"/>, when one was matched) and in any crash-handler log created since
+    /// it started — so the diagnostics log says why Roblox would not start. Null when there are none.
+    /// </summary>
+    public static string? CrashClues(DateTime startLocal, string? ownLog)
+    {
+        try
+        {
+            var files = new List<string>();
+            if (ownLog != null) files.Add(ownLog);
+            var dir = new DirectoryInfo(LogDir);
+            if (dir.Exists)
+                files.AddRange(dir.GetFiles("*CrashHandler*.log")
+                                  .Where(f => f.CreationTime >= startLocal.AddSeconds(-5))
+                                  .OrderByDescending(f => f.CreationTime).Take(2).Select(f => f.FullName));
+
+            var parts = new List<string>();
+            foreach (var file in files)
+            {
+                var lines = Tail(file, 64 * 1024)
+                    .Where(l => l.Contains("rror", StringComparison.Ordinal) || l.Contains("rash", StringComparison.Ordinal)
+                             || l.Contains("xception", StringComparison.Ordinal) || l.Contains("ail", StringComparison.Ordinal))
+                    .TakeLast(5)
+                    .Select(l => l.Length <= 200 ? l.Trim() : l[..200].Trim() + "…")
+                    .ToList();
+                if (lines.Count > 0) parts.Add($"{System.IO.Path.GetFileName(file)}: {string.Join(" | ", lines)}");
+            }
+            return parts.Count == 0 ? null : Redaction.Apply(string.Join(" || ", parts));
+        }
+        catch { return null; }
+    }
+
+    private static string[] Tail(string path, int bytes)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        long from = Math.Max(0, fs.Length - bytes);
+        fs.Seek(from, SeekOrigin.Begin);
+        var buffer = new byte[fs.Length - from];
+        int read = fs.Read(buffer, 0, buffer.Length);
+        return Encoding.UTF8.GetString(buffer, 0, read).Split('\n');
     }
 
     private static FileInfo[] ListLogs()
@@ -117,10 +172,11 @@ public static class ClientLogWatcher
     {
         if (t.StartTimeLocal == default) return null;
         var held = _byPid.Values.Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        string? path = ClientLogFiles.PickLog(logs.Select(f => (f.FullName, f.CreationTime)), t.StartTimeLocal, t.UserId, held, _owner);
+        string? path = ClientLogFiles.PickLog(logs.Select(f => (f.FullName, f.CreationTime)), t.StartTimeLocal, t.UserId, t.Pid, held, _owner, FileUsers.Of);
         if (path == null) return null;
 
         DiagnosticsService.Log("logs", $"Following {System.IO.Path.GetFileName(path)} for {t.Alias} (pid {t.Pid})");
+        EventLog.Write("LOG", EventLog.Who(t.Alias, t.UserId), ("pid", t.Pid), ("file", System.IO.Path.GetFileName(path)));
         return new Follow { Path = path, State = new ClientLogState(t.StartTimeLocal.ToUniversalTime()) };
     }
 

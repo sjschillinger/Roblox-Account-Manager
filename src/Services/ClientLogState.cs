@@ -40,6 +40,12 @@ public sealed class ClientLogState
     /// <summary>Error 273: the same account joined a game from somewhere else.</summary>
     public const int ReasonJoinedElsewhere = 273;
 
+    /// <summary>
+    /// Disconnects Roblox's own Reconnect can't undo, so there is nothing to wait for: kicked (267), the
+    /// server was shut down by its developer (274) or by Roblox (275), idle for 20 minutes (278).
+    /// </summary>
+    public static bool IsFinal(int reason) => reason is 267 or 274 or 275 or 278;
+
     public ClientPhase Phase { get; private set; } = ClientPhase.Starting;
     public DateTime PhaseSinceUtc { get; private set; }
 
@@ -111,6 +117,12 @@ public sealed class ClientLogState
     }
 
     /// <summary>
+    /// How long a client may sit on the loading screen (started, or joining) before it is restarted.
+    /// Clients start one at a time, so even a slow load is done well within this.
+    /// </summary>
+    public static readonly TimeSpan LoadingLimit = TimeSpan.FromMinutes(4);
+
+    /// <summary>
     /// True when the client has been out of a game long enough to restart it: <paramref name="wait"/>
     /// after a disconnect, longer while a teleport or a join is still allowed to finish.
     /// </summary>
@@ -119,9 +131,9 @@ public sealed class ClientLogState
         var grace = Phase switch
         {
             ClientPhase.InGame => TimeSpan.MaxValue,
-            ClientPhase.Out => wait,
+            ClientPhase.Out => IsFinal(Reason) ? TimeSpan.Zero : wait,
             ClientPhase.Teleporting => Max(wait, TimeSpan.FromMinutes(2)),
-            _ => Max(wait, TimeSpan.FromMinutes(8)),   // starting or joining: a slow load (six clients, after an update) is not a disconnect
+            _ => Max(wait, LoadingLimit),
         };
         return grace != TimeSpan.MaxValue && nowUtc - PhaseSinceUtc >= grace;
     }

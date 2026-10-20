@@ -68,6 +68,24 @@
             </ctl:DividerStack>
         </Border>
 
+        <TextBlock Text="{DynamicResource Str.EventLog.Section}" Style="{StaticResource Text.Section}" />
+        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
+            <ctl:DividerStack>
+                <ctl:SettingItem Title="{DynamicResource Str.EventLog.Title}" Description="{DynamicResource Str.EventLog.Desc}">
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding EventLogEnabled}" />
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.EventLog.Days.Title}" Description="{DynamicResource Str.EventLog.Days.Desc}" IsEnabled="{Binding EventLogEnabled}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox Style="{StaticResource Input.Number}" Text="{Binding EventLogDays, UpdateSourceTrigger=LostFocus}" />
+                        <TextBlock Text="{DynamicResource Str.Common.Unit.Days}" Style="{StaticResource Text.Caption}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                </ctl:SettingItem>
+                <ctl:SettingItem Title="{DynamicResource Str.EventLog.Files.Title}" Description="{Binding EventLogStatus}">
+                    <Button Style="{StaticResource Btn.Secondary}" Content="{DynamicResource Str.Common.OpenFolder}" Command="{Binding OpenEventLogCommand}" />
+                </ctl:SettingItem>
+            </ctl:DividerStack>
+        </Border>
+
         <TextBlock Text="{DynamicResource Str.Diagnostics.About}" Style="{StaticResource Text.Section}" />
         <Border Style="{StaticResource Panel}" Padding="18,16">
             <Grid>

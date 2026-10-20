@@ -212,7 +212,7 @@ public class FriendsViewModel : ObservableObject
 
         long place = friend.RootPlaceId > 0 ? friend.RootPlaceId : friend.PlaceId;
         _main.SetStatus(L.T("Friends.Joining", friend.DisplayNameOrUser));
-        var r = await LauncherService.LaunchAsync(acc, place, jobId: friend.JobId, followUserId: friend.UserId);
+        var r = await LauncherService.LaunchAsync(acc, place, "user: join friend", jobId: friend.JobId, followUserId: friend.UserId);
         _main.SetStatus(r.Success ? L.T("Friends.Joined", acc.DisplayNameOrUser, friend.DisplayNameOrUser) : r.Message);
         if (!r.Success) ToastService.Error(L.T("Launch.FailedTitle"), r.Message);
     }

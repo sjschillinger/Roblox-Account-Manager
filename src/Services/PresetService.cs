@@ -22,7 +22,8 @@ public static class PresetService
     /// Launches every account in the preset. Aliases that don't resolve to a known account count as
     /// failed. The destination is resolved once, before the first launch.
     /// </summary>
-    public static async Task<RunResult> LaunchAsync(LaunchPreset preset,
+    /// <param name="cause">Who started the preset (the user, a schedule, the local API), for the event log.</param>
+    public static async Task<RunResult> LaunchAsync(LaunchPreset preset, string cause,
         Action<Account, int>? onLaunching = null, Action<int>? onWaiting = null, CancellationToken ct = default)
     {
         if (_resolve == null) return new(0, 0, Array.Empty<string>());
@@ -48,7 +49,7 @@ public static class PresetService
         }
 
         var batch = await LauncherService.LaunchBatchAsync(accounts, target.Target,
-            new LauncherService.BatchOptions(preset.JoinDelaySeconds, preset.RandomDelaySeconds, preset.PerformanceProfile),
+            new LauncherService.BatchOptions(preset.JoinDelaySeconds, preset.RandomDelaySeconds, preset.PerformanceProfile, $"preset '{preset.Name}', started by {cause}"),
             onLaunching, onWaiting, ct);
 
         errors.AddRange(batch.Errors);
