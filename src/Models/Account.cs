@@ -62,8 +62,11 @@ public class Account : ObservableObject
     /// <summary>Per-account ClientAppSettings JSON, merged over the global flags at launch.</summary>
     public string FFlags { get => _fflags; set => SetField(ref _fflags, value ?? ""); }
 
-    private bool _autoRejoin;
+    private bool _autoRejoin = true;
     public bool AutoRejoin { get => _autoRejoin; set => SetField(ref _autoRejoin, value); }
+
+    /// <summary>This account's own values for Anti-AFK, recovery and its default destination (null fields = use Settings).</summary>
+    public AccountOverrides Overrides { get; set; } = new();
 
     private bool _isFavorite;
     /// <summary>Pinned accounts float to the top of their group.</summary>

@@ -74,20 +74,39 @@
                         <ColumnDefinition Width="*" MaxWidth="860" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <s:GeneralSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=General}" />
-                    <s:AppearanceSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Appearance}" />
-                    <s:LaunchingSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Launching}" />
-                    <s:GraphicsSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Graphics}" />
-                    <s:AutomationSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Automation}" />
-                    <s:HotkeysSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Hotkeys}" />
-                    <s:LiveDataSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=LiveData}" />
-                    <s:BrowserSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Browser}" />
-                    <s:NetworkSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Network}" />
-                    <s:SecuritySettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Security}" />
-                    <s:NotificationsSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Notifications}" />
-                    <s:IntegrationsSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Integrations}" />
-                    <s:UpdatesSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Updates}" />
-                    <s:DiagnosticsSettings Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Diagnostics}" />
+                    <StackPanel Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=General}">
+                        <s:GeneralSettings />
+                        <s:AppearanceSettings Margin="0,12,0,0" />
+                        <s:HotkeysSettings Margin="0,12,0,0" />
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Launching}">
+                        <s:LaunchingSettings />
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=KeepRunning}">
+                        <s:KeepRunningSettings />
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=AntiAfk}">
+                        <s:AntiAfkSettings />
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Performance}">
+                        <s:GraphicsSettings />
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Notifications}">
+                        <s:NotificationsSettings />
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=AccountsSecurity}">
+                        <s:SecuritySettings />
+                        <s:LiveDataSettings Margin="0,12,0,0" />
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=Advanced}">
+                        <s:BrowserSettings />
+                        <s:NetworkSettings Margin="0,12,0,0" />
+                        <s:IntegrationsSettings Margin="0,12,0,0" />
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding SelectedKey, Converter={StaticResource EqualsToVis}, ConverterParameter=UpdatesLogs}">
+                        <s:UpdatesSettings />
+                        <s:DiagnosticsSettings Margin="0,12,0,0" />
+                    </StackPanel>
                 </Grid>
             </ScrollViewer>
         </Grid>

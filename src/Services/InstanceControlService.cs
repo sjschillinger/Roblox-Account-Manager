@@ -144,7 +144,8 @@ public static class InstanceControlService
     /// callers must run off the UI thread. Returns false when there was nothing of ours to close
     /// or the process refused to die.
     /// </summary>
-    public static bool Close(int pid)
+    /// <param name="cause">Who is closing it and why, for the event log (e.g. "user: close button").</param>
+    public static bool Close(int pid, string cause)
     {
         bool closed = false;
         try
@@ -153,8 +154,11 @@ public static class InstanceControlService
 
             // Windows recycles PIDs. Without this name check a stale registry entry could kill
             // whatever unrelated process inherited the number.
-            bool isClient = !p.HasExited &&
-                            p.ProcessName.StartsWith("RobloxPlayer", StringComparison.OrdinalIgnoreCase);
+            // Exited a moment ago (the registry keeps a handle, so the pid still answers): let Prune
+            // report the exit, so it is logged, booked as playtime and recovered like any other.
+            if (p.HasExited) { ProcessRegistry.Prune(); return false; }
+
+            bool isClient = p.ProcessName.StartsWith("RobloxPlayer", StringComparison.OrdinalIgnoreCase);
 
             if (!isClient)
             {
@@ -164,7 +168,7 @@ public static class InstanceControlService
             }
 
             // Deliberate: the watchdog must not treat this exit as a crash and relaunch it.
-            ProcessRegistry.MarkClosing(pid);
+            ProcessRegistry.MarkClosing(pid, cause);
             p.CloseMainWindow();
             closed = p.WaitForExit(1500);
             if (!closed)
@@ -178,6 +182,7 @@ public static class InstanceControlService
         }
         catch { /* gone or access denied — nothing to close */ }
 
+        if (!closed) ProcessRegistry.UnmarkClosing(pid);   // still running: not closed, whoever asked
         if (closed)
         {
             // Prune rather than Forget: the exit is reported, so the session is booked as playtime.
@@ -192,7 +197,7 @@ public static class InstanceControlService
     /// Note: adopted external clients are registered under user id 0, so <c>CloseFor(0)</c> closes
     /// all of those at once.
     /// </summary>
-    public static int CloseFor(long userId)
+    public static int CloseFor(long userId, string cause)
     {
         int closed = 0;
         try
@@ -200,7 +205,7 @@ public static class InstanceControlService
             // Materialise first: Close() mutates the registry as we go.
             var pids = ProcessRegistry.ForUser(userId).Select(t => t.Pid).ToList();
             foreach (int pid in pids)
-                if (Close(pid)) closed++;
+                if (Close(pid, cause)) closed++;
         }
         catch { }
 
@@ -213,13 +218,13 @@ public static class InstanceControlService
     /// Closes every Roblox client on the machine, tracked or not. Delegates to
     /// <see cref="LauncherService.CloseAllClients"/> so the hotkey and this panel can never drift apart.
     /// </summary>
-    public static int CloseAll()
+    public static int CloseAll(string cause)
     {
         try
         {
             // CloseAllClients flags every client as an intentional close before killing it, so the
             // watchdog does not answer "close everything" by relaunching everything.
-            int closed = LauncherService.CloseAllClients();
+            int closed = LauncherService.CloseAllClients(cause);
             if (closed > 0)
                 AuditLogService.Log(AuditLogService.Category.Launch, $"Closed all {closed} Roblox client(s).");
             return closed;

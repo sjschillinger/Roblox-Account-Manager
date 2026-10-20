@@ -147,11 +147,11 @@ public static class PluginService
             if (acc == null) return false;
             if (placeId == 0) placeId = SettingsService.Current.DefaultPlaceId;
             if (placeId <= 0) return false;
-            var r = await LauncherService.LaunchAsync(acc, placeId, string.IsNullOrWhiteSpace(jobId) ? null : jobId);
+            var r = await LauncherService.LaunchAsync(acc, placeId, "plugin", string.IsNullOrWhiteSpace(jobId) ? null : jobId);
             return r.Success;
         }
 
-        public int Close(long userId) => InstanceControlService.CloseFor(userId);
+        public int Close(long userId) => InstanceControlService.CloseFor(userId, "plugin");
 
         public void Log(string message) => DiagnosticsService.Log("plugin", message);
 

@@ -1,11 +1,11 @@
-<UserControl x:Class="RobloxAccountManager.Views.Settings.AutomationSettings"
+<UserControl x:Class="RobloxAccountManager.Views.Settings.KeepRunningSettings"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ctl="clr-namespace:RobloxAccountManager.Controls">
     <StackPanel>
-        <TextBlock Text="{DynamicResource Str.Settings.Cat.Automation}" FontFamily="{StaticResource DisplayFont}" FontSize="18" FontWeight="SemiBold"
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.KeepRunning}" FontFamily="{StaticResource DisplayFont}" FontSize="18" FontWeight="SemiBold"
                    Foreground="{DynamicResource TextPrimaryBrush}" />
-        <TextBlock Text="{DynamicResource Str.Settings.Cat.Automation.Desc}" Style="{StaticResource Text.Caption}" FontSize="13" Margin="0,4,0,16" />
+        <TextBlock Text="{DynamicResource Str.Settings.Cat.KeepRunning.Desc}" Style="{StaticResource Text.Caption}" FontSize="13" Margin="0,4,0,16" />
 
         <Border Style="{StaticResource Panel.Inset}" Margin="0,0,0,24" Padding="16,12">
             <Grid>
@@ -21,48 +21,16 @@
             </Grid>
         </Border>
 
-        <TextBlock Text="{DynamicResource Str.AntiAfk.Section}" Style="{StaticResource Text.Section}" />
-        <Border Style="{StaticResource Panel}" Margin="0,0,0,24">
-            <ctl:DividerStack>
-                <ctl:SettingItem Title="{DynamicResource Str.AntiAfk.Title}" Description="{DynamicResource Str.AntiAfk.Desc}">
-                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AntiAfkEnabled}" />
-                </ctl:SettingItem>
-                <ctl:SettingItem Title="{DynamicResource Str.AntiAfk.Interval}" Description="{DynamicResource Str.AntiAfk.Interval.Desc}" IsEnabled="{Binding AntiAfkEnabled}">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBox Style="{StaticResource Input.Number}" Text="{Binding AntiAfkIntervalMinutes}" />
-                        <TextBlock Text="{DynamicResource Str.Common.Unit.Minutes}" Style="{StaticResource Text.Caption}" Margin="8,0,0,0" VerticalAlignment="Center" />
-                    </StackPanel>
-                </ctl:SettingItem>
-                <ctl:SettingItem Title="{DynamicResource Str.AntiAfk.Random}" Description="{DynamicResource Str.AntiAfk.Random.Desc}" IsEnabled="{Binding AntiAfkEnabled}">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="{DynamicResource Str.AntiAfk.Random.UpTo}" Style="{StaticResource Text.Caption}" Margin="0,0,8,0" VerticalAlignment="Center" />
-                        <TextBox Style="{StaticResource Input.Number}" Text="{Binding AntiAfkIntervalMaxMinutes}" IsEnabled="{Binding AntiAfkRandomize}" />
-                        <TextBlock Text="{DynamicResource Str.Common.Unit.Minutes}" Style="{StaticResource Text.Caption}" Margin="8,0,14,0" VerticalAlignment="Center" />
-                        <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AntiAfkRandomize}" />
-                    </StackPanel>
-                </ctl:SettingItem>
-                <ctl:SettingItem Title="{DynamicResource Str.AntiAfk.Key}" Description="{DynamicResource Str.AntiAfk.Key.Desc}" IsEnabled="{Binding AntiAfkEnabled}">
-                    <ComboBox Width="120" ItemsSource="{Binding AntiAfkKeys}" SelectedItem="{Binding AntiAfkKey}" />
-                </ctl:SettingItem>
-                <ctl:SettingItem Title="{DynamicResource Str.AntiAfk.Presses}" Description="{DynamicResource Str.AntiAfk.Presses.Desc}" IsEnabled="{Binding AntiAfkEnabled}">
-                    <TextBox Style="{StaticResource Input.Number}" Text="{Binding AntiAfkPresses}" />
-                </ctl:SettingItem>
-                <ctl:SettingItem Title="{DynamicResource Str.AntiAfk.Hold}" Description="{DynamicResource Str.AntiAfk.Hold.Desc}" IsEnabled="{Binding AntiAfkEnabled}">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBox Style="{StaticResource Input.Number}" Text="{Binding AntiAfkFocusSeconds}" />
-                        <TextBlock Text="{DynamicResource Str.Common.Unit.Seconds}" Style="{StaticResource Text.Caption}" Margin="8,0,0,0" VerticalAlignment="Center" />
-                    </StackPanel>
-                </ctl:SettingItem>
-                <ctl:SettingItem Title="{DynamicResource Str.AntiAfk.Loading}" Description="{DynamicResource Str.AntiAfk.Loading.Desc}" IsEnabled="{Binding AntiAfkEnabled}">
-                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AntiAfkHelpLoading}" />
-                </ctl:SettingItem>
-                <ctl:SettingItem Title="{DynamicResource Str.AntiAfk.Focus}" Description="{DynamicResource Str.AntiAfk.Focus.Desc}" IsEnabled="{Binding AntiAfkEnabled}">
-                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AntiAfkRestoreFocus}" />
-                </ctl:SettingItem>
-                <ctl:SettingItem Title="{DynamicResource Str.AntiAfk.Test}" Description="{DynamicResource Str.AntiAfk.Test.Desc}">
-                    <Button Style="{StaticResource Btn.Secondary}" Content="{DynamicResource Str.AntiAfk.TestNow}" Command="{Binding TestAntiAfkCommand}" />
-                </ctl:SettingItem>
-            </ctl:DividerStack>
+        <Border Style="{StaticResource Panel.Inset}" Margin="0,0,0,24" Padding="16,12"
+                Visibility="{Binding RecoveryOverridesText, Converter={StaticResource NullToVis}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Path Data="{StaticResource Icon.Info}" Style="{StaticResource IconPath}" Margin="0,0,12,0" VerticalAlignment="Top" />
+                <TextBlock Grid.Column="1" Text="{Binding RecoveryOverridesText}" Style="{StaticResource Text.Secondary}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </Grid>
         </Border>
 
         <TextBlock Text="{DynamicResource Str.Watchdog.Section}" Style="{StaticResource Text.Section}" />
@@ -70,12 +38,6 @@
             <ctl:DividerStack>
                 <ctl:SettingItem Title="{DynamicResource Str.Watchdog.Title}" Description="{DynamicResource Str.Watchdog.Desc}">
                     <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding WatchdogEnabled}" />
-                </ctl:SettingItem>
-                <ctl:SettingItem Title="{DynamicResource Str.Watchdog.Interval}" Description="{DynamicResource Str.Watchdog.Interval.Desc}" IsEnabled="{Binding WatchdogEnabled}">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBox Style="{StaticResource Input.Number}" Text="{Binding WatchdogCheckSeconds}" />
-                        <TextBlock Text="{DynamicResource Str.Common.Unit.Seconds}" Style="{StaticResource Text.Caption}" Margin="8,0,0,0" VerticalAlignment="Center" />
-                    </StackPanel>
                 </ctl:SettingItem>
                 <ctl:SettingItem Title="{DynamicResource Str.Watchdog.Disconnect.Title}" Description="{DynamicResource Str.Watchdog.Disconnect.Desc}" IsEnabled="{Binding WatchdogEnabled}">
                     <StackPanel Orientation="Horizontal">

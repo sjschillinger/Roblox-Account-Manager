@@ -87,6 +87,7 @@ public static class SchedulerService
                 task.LastFiredUtc = DateTime.UtcNow;
 
                 _ = FireAsync(task);
+                LogFired(task);
             }
         }
         catch { /* never let a bad tick kill the scheduler (or the process) */ }
@@ -95,6 +96,22 @@ public static class SchedulerService
             // Re-arm aligned to the next minute; skipped if Stop() ran meanwhile.
             lock (_gate) _timer?.Change(DueToNextMinute(), Timeout.InfiniteTimeSpan);
         }
+    }
+
+    /// <summary>The event-log line for a task that fired. Never lets a failure here touch the task itself.</summary>
+    private static void LogFired(ScheduledTask task)
+    {
+        string targets;
+        try
+        {
+            int n = ResolveTargetUserIds(task).Count;
+            targets = n > 0 ? n + " account(s)" : task.Action == ScheduleAction.Restart ? "every running client" : "none";
+        }
+        catch { targets = "?"; }
+        EventLog.Write("SCHEDULE", $"'{task.Name}'", ("action", task.Action), ("time", task.TimeOfDay),
+                       ("days", task.Days.Count is 0 or 7 ? "daily" : string.Join(",", task.Days)),
+                       ("preset", task.PresetName), ("account", task.Alias), ("place", task.PlaceId > 0 ? task.PlaceId : null),
+                       ("targets", targets));
     }
 
     private static async Task FireAsync(ScheduledTask task)
@@ -114,7 +131,7 @@ public static class SchedulerService
                 var ids = ResolveTargetUserIds(task);
                 bool everyone = string.IsNullOrWhiteSpace(task.PresetName) && string.IsNullOrWhiteSpace(task.Alias);
                 var clients = ProcessRegistry.All.Where(t => everyone || ids.Contains(t.UserId)).ToList();
-                int back = await WatchdogService.RestartAllAsync(clients);
+                int back = await WatchdogService.RestartAllAsync(clients, $"schedule '{task.Name}' (Restart)");
                 DiagnosticsService.Log("scheduler", $"Task '{task.Name}' restarted {back} client(s)");
                 ToastService.Info(L.T("Toast.TaskRan.Title"), task.Name);
                 return;
@@ -138,7 +155,7 @@ public static class SchedulerService
                 var preset = PresetService.Find(task.PresetName);
                 if (preset != null)
                 {
-                    var r = await PresetService.LaunchAsync(preset);
+                    var r = await PresetService.LaunchAsync(preset, $"schedule '{task.Name}'");
                     if (r.Error != null || r.Failed > 0)
                         DiagnosticsService.Warn("scheduler", $"Task '{task.Name}': {r.Launched} launched, {r.Failed} failed{(r.Error != null ? " — " + r.Error : "")}");
                 }
@@ -148,7 +165,7 @@ public static class SchedulerService
             {
                 var acc = _resolve?.Invoke(task.Alias);
                 if (acc != null && task.PlaceId > 0)
-                    await LauncherService.LaunchAsync(acc, task.PlaceId);
+                    await LauncherService.LaunchAsync(acc, task.PlaceId, $"schedule '{task.Name}'");
                 else DiagnosticsService.Warn("scheduler", $"Task '{task.Name}': account or place is missing");
             }
             ToastService.Info(L.T("Toast.TaskRan.Title"), task.Name);
@@ -184,7 +201,7 @@ public static class SchedulerService
             if (preExisting.Contains(t.Pid)) continue;   // was already running — not ours to close
             try
             {
-                if (InstanceControlService.Close(t.Pid)) closed++;
+                if (InstanceControlService.Close(t.Pid, $"schedule: '{task.Name}' ({(task.Action == ScheduleAction.Close ? "Close task" : "auto-close after its run")})")) closed++;
             }
             catch (Exception ex) { DiagnosticsService.Warn("scheduler", $"Auto-close failed for pid {t.Pid}", ex); }
         }

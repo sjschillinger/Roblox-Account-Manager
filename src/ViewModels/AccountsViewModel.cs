@@ -369,6 +369,7 @@ public class AccountsViewModel : ObservableObject
             SyncGroupOptions();
             RefreshTotp();
             RaiseFFlagWarnings();
+            RaiseOverrides();
         }
     }
 
@@ -670,7 +671,7 @@ public class AccountsViewModel : ObservableObject
         _main.SetStatus(L.T("App.Opening", acc.DisplayNameOrUser));
         try
         {
-            var r = await LauncherService.OpenRobloxAppAsync(acc);
+            var r = await LauncherService.OpenRobloxAppAsync(acc, "user: Open Roblox app");
             _store.Save();
             _main.SetStatus(r.Success ? L.T("App.Opened", acc.DisplayNameOrUser) : r.Message);
             if (!r.Success) ToastService.Error(L.T("Launch.FailedTitle"), r.Message);
@@ -709,6 +710,23 @@ public class AccountsViewModel : ObservableObject
         OnPropertyChanged(nameof(AccountProxyValid));
         RaiseFFlagWarnings();
         SyncGroupOptions();
+    }
+
+    // ---- per-account overrides (the inspector's Automation tab) ----
+
+    private OverridesEditor? _overridesEditor;
+
+    /// <summary>
+    /// Editor for the selected account's own values. A new one per selection, bound to that account,
+    /// so an edit still in a text box can never land on the next account selected.
+    /// </summary>
+    public OverridesEditor? OverridesEditor => _overridesEditor;
+
+    private void RaiseOverrides()
+    {
+        _overridesEditor = _selected == null ? null
+            : new OverridesEditor(_selected, () => _store.Save(), () => (PlaceIdText, JobIdText));
+        OnPropertyChanged(nameof(OverridesEditor));
     }
 
     // ---- per-account FastFlags ----
@@ -945,10 +963,51 @@ public class AccountsViewModel : ObservableObject
         var sel = LaunchTargets();
         if (sel == null) return;
 
+        // Launch bar empty: every account goes to its own default destination (account panel → Automation).
+        if (string.IsNullOrWhiteSpace(PlaceIdText) && string.IsNullOrWhiteSpace(JobIdText))
+        {
+            await LaunchToDefaultsAsync(sel);
+            return;
+        }
+
         // A pasted link can carry the place itself, so the Place ID box may legitimately be empty.
         var target = await ResolveJoinTargetAsync(sel);
         if (target == null) return;
         await LaunchSequential(sel, target);
+    }
+
+    /// <summary>Launches each account into its own default destination, grouped so accounts sharing one launch as a batch.</summary>
+    private async Task LaunchToDefaultsAsync(List<Account> sel)
+    {
+        var without = sel.Where(a => !a.Overrides.HasDefaultDestination).ToList();
+        if (without.Count > 0)
+        {
+            string names = string.Join(", ", without.Select(a => a.DisplayNameOrUser));
+            _main.SetStatus(L.T("Launch.NoDefault", names));
+            ToastService.Warning(L.T("Launch.NeedPlaceTitle"), L.T("Launch.NoDefault", names));
+            if (without.Count == sel.Count) return;
+        }
+
+        _launchStopped = false;
+        bool first = true;
+        foreach (var group in sel.Where(a => a.Overrides.HasDefaultDestination)
+                                 .GroupBy(a => (a.Overrides.DefaultPlaceId, Server: a.Overrides.DefaultServer.Trim())))
+        {
+            if (_launchStopped) break;   // Stop pressed during the previous group
+            if (!first) await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, SettingsService.Current.AccountJoinDelay)));
+            first = false;
+            var accounts = group.ToList();
+            var result = await JoinTargetResolver.FromServerInputAsync(group.Key.Server, group.Key.DefaultPlaceId,
+                () => accounts.FirstOrDefault(a => a.IsValid)?.Cookie ?? accounts[0].Cookie);
+            if (result.Target == null)
+            {
+                string msg = $"{string.Join(", ", accounts.Select(a => a.DisplayNameOrUser))}: {result.Error}";
+                _main.SetStatus(msg);
+                ToastService.Warning(result.ErrorTitle ?? L.T("Launch.FailedTitle"), msg);
+                continue;
+            }
+            await LaunchSequential(accounts, result.Target, "user: Launch on the Accounts page (each account's default destination)");
+        }
     }
 
     /// <summary>
@@ -996,7 +1055,7 @@ public class AccountsViewModel : ObservableObject
         var s = SettingsService.Current;
         string job = await RobloxApi.GetRandomJobIdAsync(placeId, s.ShuffleLowestServer, s.ShufflePageCount);
         if (string.IsNullOrEmpty(job)) { _main.SetStatus(L.T("Servers.NoneJoinable")); return; }
-        await LaunchSequential(sel, new JoinTarget(placeId, job));
+        await LaunchSequential(sel, new JoinTarget(placeId, job), "user: Shuffle join");
     }
 
     private string? _lastHopJobId;
@@ -1009,7 +1068,7 @@ public class AccountsViewModel : ObservableObject
         var pick = await PowerToolsService.PickBestPingAsync(placeId);
         if (pick.JobId == null) { _main.SetStatus(pick.Error ?? L.T("Servers.NoneJoinable")); return; }
         _lastHopJobId = pick.JobId;
-        await LaunchSequential(sel, new JoinTarget(placeId, pick.JobId));
+        await LaunchSequential(sel, new JoinTarget(placeId, pick.JobId), "user: Best-ping join");
     }
 
     private async Task ServerHopAsync()
@@ -1021,7 +1080,7 @@ public class AccountsViewModel : ObservableObject
         var pick = await PowerToolsService.PickHopAsync(placeId, exclude);
         if (pick.JobId == null) { _main.SetStatus(pick.Error ?? L.T("Servers.NoneJoinable")); return; }
         _lastHopJobId = pick.JobId;
-        await LaunchSequential(sel, new JoinTarget(placeId, pick.JobId));
+        await LaunchSequential(sel, new JoinTarget(placeId, pick.JobId), "user: Server hop");
     }
 
     private async Task SquadJoinAsync()
@@ -1033,7 +1092,7 @@ public class AccountsViewModel : ObservableObject
         if (pick.JobId == null) { _main.SetStatus(pick.Error ?? L.T("Servers.NoneJoinable")); return; }
         if (pick.Warning != null) ToastService.Warning(L.T("Launch.SquadTitle"), pick.Warning);
         _lastHopJobId = pick.JobId;
-        await LaunchSequential(sel, new JoinTarget(placeId, pick.JobId));
+        await LaunchSequential(sel, new JoinTarget(placeId, pick.JobId), "user: Squad join");
     }
 
     private async Task FollowAsync()
@@ -1046,7 +1105,7 @@ public class AccountsViewModel : ObservableObject
         long id = await JoinTargetResolver.ResolveUserIdAsync(user);
         if (id <= 0) { _main.SetStatus(L.T("Follow.NotFound", user)); ToastService.Error(L.T("Launch.FailedTitle"), L.T("Follow.NotFound", user)); return; }
         RememberInput(null, FollowText.Trim());
-        await LaunchSequential(sel, new JoinTarget(0, FollowUserId: id));
+        await LaunchSequential(sel, new JoinTarget(0, FollowUserId: id), "user: Follow player");
     }
 
     private void BrowseServers()
@@ -1055,7 +1114,10 @@ public class AccountsViewModel : ObservableObject
         _main.OpenServersFor(placeId);
     }
 
-    private async Task LaunchSequential(List<Account> accounts, JoinTarget target)
+    // Set when Stop ended a batch, so launching to several default destinations stops as a whole.
+    private bool _launchStopped;
+
+    private async Task LaunchSequential(List<Account> accounts, JoinTarget target, string cause = "user: Launch on the Accounts page")
     {
         if (!RequirementsService.IsRobloxInstalled())
         {
@@ -1071,7 +1133,7 @@ public class AccountsViewModel : ObservableObject
         try
         {
             result = await LauncherService.LaunchBatchAsync(accounts, target,
-                new LauncherService.BatchOptions(SettingsService.Current.AccountJoinDelay),
+                new LauncherService.BatchOptions(SettingsService.Current.AccountJoinDelay, Cause: cause),
                 onLaunching: (a, i) =>
                 {
                     if (current != null) current.IsBusy = false;
@@ -1097,6 +1159,7 @@ public class AccountsViewModel : ObservableObject
             Busy = false;
         }
 
+        _launchStopped = result.NotStarted > 0;
         if (result.NotStarted > 0)
             _main.SetStatus(L.T("Launch.Stopped", result.Launched, result.NotStarted));
         else if (result.Errors.Count > 0)

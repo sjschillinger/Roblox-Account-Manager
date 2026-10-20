@@ -55,7 +55,7 @@ public static class CliService
         }
 
         vm.SetStatus(L.T("Cli.Launching", acc.DisplayNameOrUser));
-        var r = await LauncherService.LaunchAsync(acc, placeId, jobId);
+        var r = await LauncherService.LaunchAsync(acc, placeId, "command line", jobId);
         string msg = r.Success
             ? L.T("Status.Launched", acc.DisplayNameOrUser)
             : r.Message;

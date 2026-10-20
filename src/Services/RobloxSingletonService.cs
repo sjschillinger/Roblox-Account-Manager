@@ -77,6 +77,14 @@ public static class RobloxSingletonService
     /// <summary>How many singleton-event handles have been closed since the app started.</summary>
     public static int TotalClosed => Volatile.Read(ref _totalClosed);
 
+    /// <summary>
+    /// When set, the timed sweep leaves clients younger than <see cref="YoungClientAge"/> alone; the sweep
+    /// right before the next launch still reaches them. Turned on when resetting Roblox did not stop
+    /// launches dying seconds after starting, in case closing a handle while a client starts up is what kills it.
+    /// </summary>
+    public static volatile bool GentleWithNewClients;
+    private static readonly TimeSpan YoungClientAge = TimeSpan.FromSeconds(20);
+
     /// <summary>True when a sweep was blocked by Windows — usually fixed by running as admin.</summary>
     public static bool AccessDenied => _accessDenied;
 
@@ -316,6 +324,7 @@ public static class RobloxSingletonService
                 _cleaned.IntersectWith(pids);   // drop pids that have since exited
                 targets = (force || stale) ? pids : pids.Where(p => !_cleaned.Contains(p)).ToList();
             }
+            if (!force && GentleWithNewClients) targets = targets.Where(p => !IsYoung(p)).ToList();
             if (targets.Count == 0) return 0;
 
             _lastSweepUtc = DateTime.UtcNow;
@@ -352,6 +361,12 @@ public static class RobloxSingletonService
             return closed;
         }
         finally { Volatile.Write(ref _sweeping, 0); }
+    }
+
+    private static bool IsYoung(int pid)
+    {
+        try { using var p = Process.GetProcessById(pid); return DateTime.Now - p.StartTime < YoungClientAge; }
+        catch { return false; }
     }
 
     /// <summary>PIDs of every running process that could hold the singleton event.</summary>

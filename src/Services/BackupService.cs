@@ -41,7 +41,8 @@ public static class BackupService
         // v2.0+: carried so a restore brings the whole account back, not just its session.
         public string Color { get; set; } = "";
         public bool IsFavorite { get; set; }
-        public bool AutoRejoin { get; set; }
+        public bool AutoRejoin { get; set; } = true;
+        public AccountOverrides? Overrides { get; set; }
         public string FFlags { get; set; } = "";
         public string ProxyUrl { get; set; } = "";
         public DateTime? AddedUtc { get; set; }
@@ -64,6 +65,7 @@ public static class BackupService
             Color = a.Color,
             IsFavorite = a.IsFavorite,
             AutoRejoin = a.AutoRejoin,
+            Overrides = a.Overrides,
             FFlags = a.FFlags,
             ProxyUrl = a.ProxyUrl,
             AddedUtc = a.AddedUtc,
@@ -113,6 +115,7 @@ public static class BackupService
             Color = e.Color ?? "",
             IsFavorite = e.IsFavorite,
             AutoRejoin = e.AutoRejoin,
+            Overrides = e.Overrides ?? new(),
             FFlags = e.FFlags ?? "",
             ProxyUrl = e.ProxyUrl ?? "",
             AddedUtc = e.AddedUtc ?? DateTime.UtcNow,

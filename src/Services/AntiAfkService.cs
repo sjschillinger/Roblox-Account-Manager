@@ -47,7 +47,7 @@ public static class AntiAfkService
         // New interval settings: give every client a fresh (staggered) schedule under them.
         foreach (var st in _clients.Values) st.NextDueUtc = DateTime.MinValue;
         ClientLogWatcher.Apply();   // loading help reads the client logs
-        if (s.AntiAfkEnabled) Start();
+        if (AccountSettings.AnyAfkOn) Start();
         else Stop();
     }
 
@@ -73,10 +73,11 @@ public static class AntiAfkService
         try
         {
             var s = SettingsService.Current;
-            if (!s.AntiAfkEnabled) { Stop(); return; }   // disabled since the timer was armed
+            if (!AccountSettings.AnyAfkOn) { Stop(); return; }   // disabled since the timer was armed
 
             var now = DateTime.UtcNow;
-            var live = ProcessRegistry.All.ToList();
+            // Each client follows its account's own Anti-AFK setting, or the global one.
+            var live = ProcessRegistry.All.Where(t => AccountSettings.AfkOn(AccountSettings.For(t.UserId))).ToList();
 
             foreach (int pid in _clients.Keys.Except(live.Select(t => t.Pid)).ToList())
                 _clients.TryRemove(pid, out _);
@@ -86,7 +87,10 @@ public static class AntiAfkService
             {
                 var st = _clients.GetOrAdd(t.Pid, _ => new ClientState { NextDueUtc = DateTime.MinValue });
                 if (st.NextDueUtc == DateTime.MinValue)
-                    st.NextDueUtc = now + AfkSchedule.FirstDelay(s.AntiAfkIntervalMinutes, s.AntiAfkIntervalMaxMinutes, s.AntiAfkRandomize, Random.Shared);
+                {
+                    var (min, max, randomize) = AccountSettings.AfkInterval(AccountSettings.For(t.UserId));
+                    st.NextDueUtc = now + AfkSchedule.FirstDelay(min, max, randomize, Random.Shared);
+                }
                 else if (st.NextDueUtc <= now || (s.AntiAfkHelpLoading && StillLoading(t, now) && now - st.LastVisitUtc > TimeSpan.FromSeconds(90)))
                     due.Add(t);
             }
@@ -114,7 +118,6 @@ public static class AntiAfkService
         try
         {
             var s = SettingsService.Current;
-            ushort vk = VkForKey(s.AntiAfkKey);
             IntPtr userWindow = Win32.GetForegroundWindow();   // where the user was
 
             // A different order every pass, so the clients aren't always visited in the same sequence.
@@ -123,7 +126,11 @@ public static class AntiAfkService
             {
                 var t = order[i];
                 var st = _clients.GetOrAdd(t.Pid, _ => new ClientState());
-                var interval = AfkSchedule.NextInterval(s.AntiAfkIntervalMinutes, s.AntiAfkIntervalMaxMinutes, s.AntiAfkRandomize, Random.Shared);
+                var acc = AccountSettings.For(t.UserId);
+                var (min, max, randomize) = AccountSettings.AfkInterval(acc);
+                var interval = AfkSchedule.NextInterval(min, max, randomize, Random.Shared);
+                string key = AccountSettings.AfkKey(acc);
+                ushort vk = VkForKey(key);
 
                 IntPtr hWnd = ProcessRegistry.WindowHandle(t.Pid);
                 if (hWnd == IntPtr.Zero) { st.NextDueUtc = DateTime.UtcNow + AfkSchedule.AfterFailure(interval); continue; }
@@ -168,7 +175,7 @@ public static class AntiAfkService
                 if (refused > 0)
                     DiagnosticsService.Warn("anti-afk", $"{t.Alias}: Windows refused {refused} of {pressed + refused} key presses (is Roblox running as administrator?)");
                 else
-                    DiagnosticsService.Log("anti-afk", $"Pressed {s.AntiAfkKey} {pressed}x in {t.Alias}'s window");
+                    DiagnosticsService.Log("anti-afk", $"Pressed {key} {pressed}x in {t.Alias}'s window");
                 if (wasMinimized) Win32.ShowWindow(hWnd, SW_SHOWMINNOACTIVE);
 
                 st.LastSentUtc = DateTime.UtcNow;

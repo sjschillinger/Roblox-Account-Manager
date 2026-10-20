@@ -29,7 +29,7 @@ public static class RamMonitorService
     {
         var s = SettingsService.Current;
         // Memory-growth restarts (WatchdogService) need the samples even with the monitor itself off.
-        if (s.RamMonitorEnabled || s.RestartOnRamGrowth) Start(Math.Max(2, s.RamMonitorSeconds));
+        if (s.RamMonitorEnabled || AccountSettings.AnyRamGrowth) Start(Math.Max(2, s.RamMonitorSeconds));
         else Stop();
         ApplyAutoTrim();
     }
@@ -174,8 +174,10 @@ public static class RamMonitorService
         {
             using var p = Process.GetProcessById(pid);
             if (!p.ProcessName.StartsWith("RobloxPlayer", StringComparison.OrdinalIgnoreCase)) { ProcessRegistry.Forget(pid); return; }
-            ProcessRegistry.MarkClosing(pid);
-            p.Kill();
+            // Not marked as a deliberate close: the account is kept running, so the watchdog relaunches it.
+            ProcessRegistry.NoteKill(pid, $"RAM monitor: {mb} MB is over the {limit} MB limit");
+            try { p.Kill(); }
+            catch { ProcessRegistry.UnmarkClosing(pid); throw; }
             DiagnosticsService.Warn("ram", $"Closed {alias}: {mb} MB is over the {limit} MB limit");
             if (SettingsService.Current.EnableToasts)
                 ToastService.Warning(L.T("Toast.RamKill.Title"), L.T("Toast.RamKill.Body", alias, mb, limit));

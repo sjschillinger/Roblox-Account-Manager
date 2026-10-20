@@ -327,11 +327,12 @@ public class MainViewModel : ObservableObject
         }));
     }
 
-    public void CloseAllClients()
+    /// <param name="cause">Where "close all" came from, for the event log.</param>
+    public void CloseAllClients(string cause = "user: Close all")
     {
         _ = Task.Run(() =>
         {
-            int n = InstanceControlService.CloseAll();
+            int n = InstanceControlService.CloseAll(cause);
             SetStatus(n > 0 ? L.N("Status.ClosedClients", n) : L.T("Status.NoClients"));
         });
     }

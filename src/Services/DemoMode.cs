@@ -174,7 +174,7 @@ internal static class DemoMode
                 Shot((FrameworkElement)window.Content, $"{tag}-{i}-{pages[i]}.png");
             }
 
-            foreach (var cat in new[] { "Appearance", "Launching", "Graphics", "Security", "Integrations", "Updates" })
+            foreach (var cat in new[] { "General", "Launching", "KeepRunning", "Performance", "AccountsSecurity", "Advanced", "UpdatesLogs" })
             {
                 vm.Settings.SelectedCategory = vm.Settings.Categories.First(c => c.Key == cat);
                 await Settle();

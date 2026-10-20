@@ -123,7 +123,7 @@ public partial class MainWindow : Window
                 onOpen: BringToFront,
                 onExit: () => { _reallyClose = true; Close(); },
                 onLock: () => LockService.Lock("tray"),
-                onCloseClients: _vm.CloseAllClients);
+                onCloseClients: () => _vm.CloseAllClients("user: Close all (tray menu)"));
         }
         catch (Exception ex)
         {

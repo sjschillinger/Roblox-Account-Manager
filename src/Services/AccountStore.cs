@@ -128,7 +128,8 @@ public class AccountStore
         public string TotpSecret { get; set; } = "";
         public string ProxyUrl { get; set; } = "";
         public string FFlags { get; set; } = "";
-        public bool AutoRejoin { get; set; }
+        public bool AutoRejoin { get; set; } = true;
+        public AccountOverrides? Overrides { get; set; }
         public bool IsFavorite { get; set; }
         public string Color { get; set; } = "";
         public DateTime? AddedUtc { get; set; }
@@ -154,6 +155,7 @@ public class AccountStore
             ProxyUrl = a.ProxyUrl,
             FFlags = a.FFlags,
             AutoRejoin = a.AutoRejoin,
+            Overrides = a.Overrides,
             IsFavorite = a.IsFavorite,
             Color = a.Color,
             AddedUtc = a.AddedUtc,
@@ -178,6 +180,7 @@ public class AccountStore
                 ProxyUrl = ProxyUrl ?? "",
                 FFlags = FFlags ?? "",
                 AutoRejoin = AutoRejoin,
+                Overrides = Overrides ?? new(),
                 IsFavorite = IsFavorite,
                 Color = Color ?? "",
                 AddedUtc = AddedUtc,

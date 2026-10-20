@@ -75,13 +75,13 @@ public class ClientLogStateTests
     }
 
     [Fact]
-    public void Slow_load_gets_eight_minutes()
+    public void A_load_gets_four_minutes()
     {
         var s = new ClientLogState(T0);
-        Assert.False(s.NeedsRecovery(T0.AddMinutes(7), Wait));
-        Assert.True(s.NeedsRecovery(T0.AddMinutes(8), Wait));
+        Assert.False(s.NeedsRecovery(T0.AddMinutes(3.9), Wait));
+        Assert.True(s.NeedsRecovery(T0.AddMinutes(4), Wait));
         s.Feed(Joining, T0.AddMinutes(1));
-        Assert.False(s.NeedsRecovery(T0.AddMinutes(8.5), Wait));
+        Assert.False(s.NeedsRecovery(T0.AddMinutes(4.5), Wait));
     }
 
     [Theory]
@@ -99,10 +99,42 @@ public class ClientLogStateTests
         var held = new HashSet<string>();
         var owners = new Dictionary<string, long> { ["a.log"] = 999 };
 
-        Assert.Equal("a.log", ClientLogFiles.PickLog(logs, start, 999, held, owners));   // its own account
-        Assert.Equal("b.log", ClientLogFiles.PickLog(logs, start, 111, held, owners));   // not the other account's
+        Assert.Equal("a.log", ClientLogFiles.PickLog(logs, start, 999, 1, held, owners));   // its own account
+        Assert.Equal("b.log", ClientLogFiles.PickLog(logs, start, 111, 1, held, owners));   // not the other account's
         held.Add("b.log");
-        Assert.Null(ClientLogFiles.PickLog(logs, start, 111, held, owners));
+        Assert.Null(ClientLogFiles.PickLog(logs, start, 111, 1, held, owners));
+    }
+
+    [Fact]
+    public void The_log_a_client_has_open_is_its_own_whatever_the_start_times_say()
+    {
+        // 16 Oct: six clients started 5 s apart; the closest log by time was another client's.
+        var start = new DateTime(2026, 10, 16, 4, 19, 33);
+        var logs = new[] { ("near.log", start.AddSeconds(1)), ("own.log", start.AddSeconds(9)) };
+        var open = new Dictionary<string, int[]> { ["near.log"] = new[] { 200 }, ["own.log"] = new[] { 100 } };
+        IReadOnlyCollection<int>? UsersOf(string path) => open.TryGetValue(path, out var pids) ? pids : null;
+
+        Assert.Equal("own.log", ClientLogFiles.PickLog(logs, start, 5, 100, new HashSet<string>(), new Dictionary<string, long>(), UsersOf));
+    }
+
+    [Fact]
+    public void A_client_whose_log_is_not_open_yet_waits_instead_of_taking_another_clients()
+    {
+        var start = new DateTime(2026, 10, 16, 20, 25, 53);
+        var logs = new[] { ("other.log", start.AddSeconds(2)) };
+        IReadOnlyCollection<int>? UsersOf(string path) => new[] { 200 };
+
+        Assert.Null(ClientLogFiles.PickLog(logs, start, 5, 100, new HashSet<string>(), new Dictionary<string, long>(), UsersOf));
+    }
+
+    [Fact]
+    public void When_Windows_cannot_say_who_has_a_log_open_start_times_decide()
+    {
+        var start = new DateTime(2026, 10, 16, 20, 25, 53);
+        var logs = new[] { ("late.log", start.AddSeconds(40)), ("close.log", start.AddSeconds(2)) };
+
+        Assert.Equal("close.log", ClientLogFiles.PickLog(logs, start, 5, 100, new HashSet<string>(), new Dictionary<string, long>(), _ => null));
+        Assert.Equal("close.log", ClientLogFiles.PickLog(logs, start, 5, 100, new HashSet<string>(), new Dictionary<string, long>(), _ => Array.Empty<int>()));
     }
 
     [Theory]

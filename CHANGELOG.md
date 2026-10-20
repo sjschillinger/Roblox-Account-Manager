@@ -15,6 +15,86 @@ into the exe and shown in **What's new**, so a release no longer needs its own n
 
 ---
 
+## v2.4.1 — 2026-10-16 (community build)
+
+Fixes from a week of unattended running with six accounts.
+
+**Don't update from inside the app.** The in-app updater follows the original project's releases,
+not this one. Turn off **Settings → Updates & logs → Check automatically** and **Check at startup**.
+
+### Fixed
+
+- **Disconnected accounts were never rejoined.** Recovery only covered accounts with **Rejoin after a
+  crash** switched on, and it was off unless switched on per account, so with recovery on in Settings
+  nothing came back (16 Oct: all six sat disconnected for 8 hours). Every account now has it on; switch
+  it off on an account to leave that one alone.
+- **"Started outside the manager" and launches that closed after a few seconds.** A client leaving its
+  game starts a new, windowless Roblox process; the next launch handed its ticket to that process and
+  exited, and the process then played that account as an outside client. Such processes are now closed
+  within seconds, and any windowless stray is closed right before every launch.
+- **Stuck on the loading screen.** A client still loading after 4 minutes (was 8) is closed and
+  relaunched. Each client's log is now the one it has open, asked of Windows, instead of the one
+  created closest to its start: with clients starting seconds apart, a client could follow another
+  client's log or none, and then nothing could tell it was stuck. A fresh client that still has no log
+  of its own after 5 minutes is relaunched too.
+- **No client would start until the PC was restarted.** When launches keep dying in a row, the manager
+  repairs Roblox itself: after two, it closes stray processes and orphaned Roblox helpers and takes
+  Roblox's single-instance lock afresh; after four, it closes every Roblox process, waits for all of
+  them to be gone and starts the accounts again one at a time (what a restart did). A reset that
+  doesn't help is tried again after 10, 20, then every 30 minutes, until a client reaches its game.
+  What Roblox logged about each early crash goes into the diagnostics log. A reset also covers what
+  else a restart used to fix: it names any Roblox process Windows won't close (started as
+  administrator, or stuck while ending), warns when Windows is nearly out of memory and says what is
+  using it, and if a reset didn't help, leaves new clients alone while they start up (multi-instance is
+  then unlocked just before the next launch instead).
+- **Roblox updates.** While Roblox's installer runs, nothing is launched and the manager lets go of
+  Roblox's single-instance lock; launches resume when the update is done.
+
+---
+
+## v2.4.0 — 2026-10-12 (community build)
+
+Built to keep every account running indefinitely without daily fixes, and to make every launch,
+close and relaunch traceable afterwards.
+
+**Don't update from inside the app.** The in-app updater follows the original project's releases,
+not this one. Turn off **Settings → Updates & logs → Check automatically** and **Check at startup**.
+
+### Changed
+
+- **Each Roblox client is tied to its account for certain.** Every launch carries the account's
+  tracker id and its own launch time on the client's command line; the manager reads that instead of
+  guessing "the next window that appears". A slow client is no longer lost (it used to be dropped
+  after 34 seconds, never rejoined again, and then shown as "started outside the manager"), one
+  account's rejoin can no longer take another account's client, and clients still running after a
+  manager restart are recognised and looked after again.
+- **One supervisor per account.** Rejoins, restarts, schedules, presets and your own clicks all go
+  through the same per-account state, so they can't race each other into duplicate clients. Every few
+  seconds it checks each account's client and does at most one thing: wait, close and relaunch it,
+  or relaunch it.
+- **Recovery, step by step.** Disconnected: Roblox gets the set wait to reconnect on its own; then
+  the client is closed and relaunched into the same server; if that fails too, into any server of the
+  place (public servers). A shut-down server, a kick or an idle disconnect skips the wait. A launch
+  whose client never appears within 2 minutes is retried. Retries never stop while rejoin is on, but
+  slow down (3 quick ones, then 2, 5, 10 and 15 minutes); only 10 minutes actually in the game counts
+  as recovered. Only a missing or rejected cookie stops recovery.
+- **A RAM-limit kill is now relaunched** like a crash instead of leaving the account offline.
+- **Settings are organized into 9 pages:** General, Launching, Keep running, Anti-AFK, Performance,
+  Notifications, Accounts & security, Advanced, Updates & logs. Client window size moved to
+  Launching. The watchdog check interval is gone (the supervisor checks every 5 seconds).
+
+### Added
+
+- **Event log** (Settings → Updates & logs). Every launch, client found, close, exit, client state
+  change, recovery decision and schedule run, with the time, account, process id, launch id and what
+  caused it. Exits include Windows' exit code, who closed the client (or "nobody") and its last state
+  from its own Roblox log. One file per day in `data\events`, kept 7 days by default, never more
+  than 50 MB in total. Never contains cookies or private-server codes.
+- **Per-account settings** (account panel → Automation): Anti-AFK on/off, interval and key;
+  disconnect wait, timed restart and memory-growth restart; and a **default destination** each
+  account launches into when you press Launch with the launch bar empty. Anything left empty follows
+  Settings.
+
 ## v2.3.1 — 2026-10-07 (community build)
 
 **Don't update from inside the app.** The in-app updater follows the original project's releases,

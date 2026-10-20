@@ -59,7 +59,7 @@ public class DashboardViewModel : ObservableObject
         RestoreAllCommand = new RelayCommand(_ => Report(InstanceControlService.RestoreAll(), "Clients.Restored"));
         CloseAllCommand = new RelayCommand(_ => CloseAll());
         FocusClientCommand = new RelayCommand(p => { if (p is int pid && !InstanceControlService.Focus(pid)) _main.SetStatus(L.T("Clients.NoWindow")); });
-        CloseClientCommand = new RelayCommand(p => { if (p is int pid) _ = Task.Run(() => { InstanceControlService.Close(pid); }); });
+        CloseClientCommand = new RelayCommand(p => { if (p is int pid) _ = Task.Run(() => { InstanceControlService.Close(pid, "user: close button on the overview"); }); });
         MinimizeClientCommand = new RelayCommand(p => { if (p is int pid && !InstanceControlService.Minimize(pid)) _main.SetStatus(L.T("Clients.NoWindow")); });
         CancelRejoinCommand = new RelayCommand(p => { if (p is long id) { WatchdogService.CancelRejoin(id); RefreshClients(); } });
         OpenAccountCommand = new RelayCommand(p => { if (p is Account a) _main.ShowAccount(a); });

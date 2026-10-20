@@ -260,7 +260,7 @@ public static class WebApiService
             target = resolved.Target;
         }
 
-        var result = await LauncherService.LaunchAsync(acc, target);
+        var result = await LauncherService.LaunchAsync(acc, target, "local API: launch");
         await WriteJsonAsync(ctx, result.Success ? 200 : 400, new { ok = result.Success, message = result.Message });
     }
 
@@ -274,7 +274,7 @@ public static class WebApiService
         {
             try
             {
-                var r = await PresetService.LaunchAsync(preset);
+                var r = await PresetService.LaunchAsync(preset, "local API");
                 DiagnosticsService.Log("webapi", $"Preset '{preset.Name}': {r.Launched} launched, {r.Failed} failed");
             }
             catch (Exception ex) { DiagnosticsService.Warn("webapi", $"Preset '{preset.Name}' failed", ex); }
@@ -287,7 +287,7 @@ public static class WebApiService
         var acc = Resolve(ctx.Request.QueryString["account"]);
         if (acc == null) { await WriteJsonAsync(ctx, 404, new { error = "account not found" }); return; }
 
-        int closed = await Task.Run(() => InstanceControlService.CloseFor(acc.UserId));
+        int closed = await Task.Run(() => InstanceControlService.CloseFor(acc.UserId, "local API: close"));
         await WriteJsonAsync(ctx, 200, new { ok = true, closed });
     }
 

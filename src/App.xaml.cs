@@ -160,6 +160,20 @@ public partial class App : Application
         // Discord invite) also need Roblox's per-client singleton lock cleared.
         RobloxSingletonService.Apply();
 
+        AccountSettings.Init(() => vm.Store.Accounts.ToList());
+        EventLog.Start();
+
+        // A running client is tied to its account by the tracker id on its command line.
+        ProcessRegistry.Init(LauncherService.AccountByTracker);
+        if (!SettingsService.Current.RejoinOnForAllApplied)
+        {
+            int switched = 0;
+            foreach (var a in vm.Store.Accounts.Where(a => !a.AutoRejoin)) { a.AutoRejoin = true; switched++; }
+            if (switched > 0) { try { vm.Store.Save(); } catch { } }
+            SettingsService.Current.RejoinOnForAllApplied = true;
+            SettingsService.Save();
+            if (switched > 0) DiagnosticsService.Log("watchdog", $"Switched on \"Rejoin after a crash\" for {switched} account(s): recovery now covers every account unless switched off for one");
+        }
         WatchdogService.Init(userId => vm.Store.Accounts.FirstOrDefault(a => a.UserId == userId));
         WatchdogService.Apply();
         AntiAfkService.Apply();
@@ -231,7 +245,7 @@ public partial class App : Application
                 break;
 
             case "CloseAllRoblox":
-                vm.CloseAllClients();
+                vm.CloseAllClients("user: Close all hotkey");
                 break;
 
             case "LockManager":
@@ -327,6 +341,7 @@ public partial class App : Application
         PlaytimeService.FlushOpenSessions();
         AntiAfkService.Stop();
         WatchdogService.Stop();
+        EventLog.Stop();
         SchedulerService.Stop();
         RamMonitorService.Stop();
         WebApiService.Stop();

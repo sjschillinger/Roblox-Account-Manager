@@ -103,6 +103,12 @@ public class AppSettings
     /// <summary>Also focus a client whose log shows it still loading after 45 s: clients in the background can stall mid-load.</summary>
     public bool AntiAfkHelpLoading { get; set; } = true;
 
+    /// <summary>
+    /// Set once every existing account has had "Rejoin after a crash" switched on. Before 2.4 it was off
+    /// unless switched on per account, so turning on recovery in Settings silently recovered nobody.
+    /// </summary>
+    public bool RejoinOnForAllApplied { get; set; }
+
     // ---- Crash watchdog ----
     public bool WatchdogEnabled { get; set; } = false;
     public int WatchdogCheckSeconds { get; set; } = 30;
@@ -117,6 +123,12 @@ public class AppSettings
     /// <summary>Close and relaunch every client after it has run this long (fresh session, memory back).</summary>
     public bool RestartClientsEnabled { get; set; } = false;
     public int RestartClientsMinutes { get; set; } = 180;
+
+    // ---- Event log ----
+    /// <summary>Record every launch, close, exit and recovery decision with its cause (data/events).</summary>
+    public bool EventLogEnabled { get; set; } = true;
+    /// <summary>Days of event files kept (capped at 50 MB in total whatever this says).</summary>
+    public int EventLogDays { get; set; } = 7;
 
     // ---- Startup checks ----
     public bool ValidateCookiesOnStartup { get; set; } = false;
